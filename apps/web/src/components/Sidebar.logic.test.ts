@@ -11,6 +11,7 @@ import {
   isContextMenuPointerDown,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  partitionProjectsForSidebar,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
@@ -907,6 +908,32 @@ describe("getFallbackThreadIdAfterDelete", () => {
     expect(fallbackThreadId).toBe(ThreadId.make("thread-next"));
   });
 });
+
+describe("partitionProjectsForSidebar", () => {
+  it("keeps folder projects first and moves devspace-backed projects to their own ordered section", () => {
+    const projects = [
+      { id: "folder-1" },
+      { id: "devspace-1", devspaceRepo: "owner/repo" },
+      {
+        id: "devspace-group",
+        memberProjects: [{ devspaceRepo: "owner/grouped-repo" }, {}],
+      },
+      { id: "folder-2", memberProjects: [{}] },
+    ];
+
+    const partitioned = partitionProjectsForSidebar(projects);
+
+    expect(partitioned.folderProjects.map((project) => project.id)).toEqual([
+      "folder-1",
+      "folder-2",
+    ]);
+    expect(partitioned.devspaceProjects.map((project) => project.id)).toEqual([
+      "devspace-1",
+      "devspace-group",
+    ]);
+  });
+});
+
 describe("sortProjectsForSidebar", () => {
   it("sorts projects by the most recent user message across their threads", () => {
     const projects = [

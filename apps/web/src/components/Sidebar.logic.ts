@@ -24,6 +24,11 @@ type SidebarProject = {
   updatedAt?: string | undefined;
 };
 
+type SidebarProjectPartitionInput = {
+  devspaceRepo?: string | undefined;
+  memberProjects?: readonly { devspaceRepo?: string | undefined }[];
+};
+
 export type ThreadTraversalDirection = "previous" | "next";
 
 export interface ThreadStatusPill {
@@ -569,4 +574,24 @@ export function sortProjectsForSidebar<
     if (byTimestamp !== 0) return byTimestamp;
     return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
   });
+}
+
+export function partitionProjectsForSidebar<TProject extends SidebarProjectPartitionInput>(
+  projects: readonly TProject[],
+): { folderProjects: TProject[]; devspaceProjects: TProject[] } {
+  const folderProjects: TProject[] = [];
+  const devspaceProjects: TProject[] = [];
+
+  for (const project of projects) {
+    const isDevspaceProject =
+      project.devspaceRepo !== undefined ||
+      project.memberProjects?.some((member) => member.devspaceRepo !== undefined) === true;
+    if (isDevspaceProject) {
+      devspaceProjects.push(project);
+    } else {
+      folderProjects.push(project);
+    }
+  }
+
+  return { folderProjects, devspaceProjects };
 }
