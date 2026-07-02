@@ -1,0 +1,9 @@
+[repos.alchemy-effect]
+url = "https://github.com/alchemy-run/alchemy-effect.git"
+mode = "exact"
+commit = "afc2585aee3daf069a118f0f161752dfc8a05c5d"
+
+[repos.effect-smol]
+url = "https://github.com/Effect-TS/effect-smol.git"
+mode = "exact"
+commit = "0de3cc2a2d51e98345f4bd37b649ecea3d90b51e"
