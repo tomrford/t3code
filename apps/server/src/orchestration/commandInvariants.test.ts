@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "@effect/vitest";
 import {
   MessageId,
   CommandId,
@@ -17,6 +17,7 @@ import {
   requireNonNegativeInteger,
   requireThread,
   requireThreadAbsent,
+  requireValidTurnStartBootstrap,
 } from "./commandInvariants.ts";
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -216,4 +217,24 @@ describe("commandInvariants", () => {
       ),
     ).rejects.toThrow("greater than or equal to 0");
   });
+
+  it.effect("rejects bootstrap commands that prepare both worktree and devspace", () =>
+    Effect.gen(function* () {
+      const result = yield* requireValidTurnStartBootstrap({
+        ...messageSendCommand,
+        bootstrap: {
+          prepareWorktree: {
+            projectCwd: "/tmp/project",
+            baseBranch: "main",
+          },
+          prepareDevspace: {
+            repo: "owner/repo",
+            rev: "trunk()",
+          },
+        },
+      }).pipe(Effect.flip);
+
+      expect(result.message).toContain("cannot prepare both a worktree and a devspace checkout");
+    }),
+  );
 });

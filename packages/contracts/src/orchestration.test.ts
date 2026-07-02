@@ -279,12 +279,17 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
           branch: "t3code/example",
           startFromOrigin: true,
         },
+        prepareDevspace: {
+          repo: "owner/repo",
+          rev: "trunk()",
+        },
         runSetupScript: true,
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.bootstrap?.createThread?.projectId, "project-1");
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.baseBranch, "main");
+    assert.strictEqual(parsed.bootstrap?.prepareDevspace?.repo, "owner/repo");
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.startFromOrigin, true);
     assert.strictEqual(parsed.bootstrap?.runSetupScript, true);
   }),

@@ -157,3 +157,17 @@ export function requireNonNegativeInteger(input: {
     ),
   );
 }
+
+export function requireValidTurnStartBootstrap(
+  command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>,
+): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (!command.bootstrap?.prepareWorktree || !command.bootstrap.prepareDevspace) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      command.type,
+      "Thread turn bootstrap cannot prepare both a worktree and a devspace checkout.",
+    ),
+  );
+}

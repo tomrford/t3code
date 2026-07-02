@@ -36,6 +36,7 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReaper.ts";
 import * as DevspaceCli from "./devspace/DevspaceCli.ts";
+import { shouldRemoveThreadDevspaceCheckout } from "./devspace/checkoutCleanup.ts";
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -314,6 +315,49 @@ export const reconcileDevspaceProjects = Effect.gen(function* () {
   );
 });
 
+export const sweepOrphanedDevspaceCheckouts = Effect.gen(function* () {
+  const devspace = yield* DevspaceCli.DevspaceCli;
+  const fs = yield* FileSystem.FileSystem;
+  const projectionReadModelQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const serverConfig = yield* ServerConfig.ServerConfig;
+
+  const readModel = yield* projectionReadModelQuery.getCommandReadModel();
+  const orphanPaths = new Set<string>();
+
+  for (const thread of readModel.threads) {
+    if (thread.deletedAt === null) {
+      continue;
+    }
+    const shouldRemove = yield* shouldRemoveThreadDevspaceCheckout({
+      readModel,
+      thread,
+      devspacesDir: serverConfig.devspacesDir,
+    });
+    if (shouldRemove && thread.worktreePath !== null) {
+      orphanPaths.add(thread.worktreePath);
+    }
+  }
+
+  yield* Effect.forEach(
+    orphanPaths,
+    (orphanPath) =>
+      Effect.gen(function* () {
+        if (!(yield* fs.exists(orphanPath))) {
+          return;
+        }
+        yield* devspace.removeCheckout({ path: orphanPath });
+      }).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to remove orphaned devspace checkout", {
+            path: orphanPath,
+            cause,
+          }),
+        ),
+      ),
+    { concurrency: 1 },
+  );
+});
+
 const resolveStartupBrowserTarget = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
@@ -418,6 +462,18 @@ export const make = Effect.gen(function* () {
         Effect.provideService(Crypto.Crypto, crypto),
         Effect.catch((cause) =>
           Effect.logWarning("devspace project reconciliation failed", {
+            cause,
+          }),
+        ),
+      ),
+    );
+
+    yield* Effect.logDebug("startup phase: sweeping orphaned devspace checkouts");
+    yield* runStartupPhase(
+      "devspace.checkouts.sweep",
+      sweepOrphanedDevspaceCheckouts.pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("orphaned devspace checkout sweep failed", {
             cause,
           }),
         ),

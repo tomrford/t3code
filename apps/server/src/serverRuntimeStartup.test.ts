@@ -1,9 +1,17 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { DEFAULT_MODEL, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL,
+  type OrchestrationReadModel,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
+import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
@@ -11,6 +19,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
+import * as DevspaceCli from "./devspace/DevspaceCli.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
@@ -266,5 +275,141 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
 
     assert.strictEqual(error, uuidError);
     assert.deepStrictEqual(yield* Ref.get(dispatchCalls), []);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("sweepOrphanedDevspaceCheckouts removes only recorded deleted unshared checkouts", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const devspacesDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-devspace-sweep-",
+    });
+    const orphanPath = `${devspacesDir}/owner/repo/thread-deleted`;
+    const sharedPath = `${devspacesDir}/owner/repo/shared`;
+    const outsidePath = `${devspacesDir}/../outside-devspace/thread-deleted`;
+    yield* fileSystem.makeDirectory(orphanPath, { recursive: true });
+    yield* fileSystem.makeDirectory(sharedPath, { recursive: true });
+
+    const projectId = ProjectId.make("project-devspace-sweep");
+    const modelSelection = createModelSelection(ProviderInstanceId.make("codex"), DEFAULT_MODEL);
+    const readModel: OrchestrationReadModel = {
+      snapshotSequence: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      projects: [
+        {
+          id: projectId,
+          title: "owner/repo",
+          workspaceRoot: `${devspacesDir}/owner/repo`,
+          devspaceRepo: "owner/repo",
+          repositoryIdentity: null,
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          deletedAt: null,
+        },
+      ],
+      threads: [
+        {
+          id: ThreadId.make("thread-deleted-orphan"),
+          projectId,
+          title: "Deleted Orphan",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: orphanPath,
+          latestTurn: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archivedAt: null,
+          deletedAt: "2026-01-01T00:00:01.000Z",
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+        },
+        {
+          id: ThreadId.make("thread-deleted-shared"),
+          projectId,
+          title: "Deleted Shared",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: sharedPath,
+          latestTurn: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archivedAt: null,
+          deletedAt: "2026-01-01T00:00:01.000Z",
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+        },
+        {
+          id: ThreadId.make("thread-live-shared"),
+          projectId,
+          title: "Live Shared",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: sharedPath,
+          latestTurn: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+        },
+        {
+          id: ThreadId.make("thread-deleted-outside"),
+          projectId,
+          title: "Deleted Outside",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: outsidePath,
+          latestTurn: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archivedAt: null,
+          deletedAt: "2026-01-01T00:00:01.000Z",
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+        },
+      ],
+    };
+    const removedPaths = yield* Ref.make<ReadonlyArray<string>>([]);
+
+    yield* ServerRuntimeStartup.sweepOrphanedDevspaceCheckouts.pipe(
+      Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+        getCommandReadModel: () => Effect.succeed(readModel),
+      } as never),
+      Effect.provideService(DevspaceCli.DevspaceCli, {
+        removeCheckout: ({
+          path,
+        }: Parameters<DevspaceCli.DevspaceCli["Service"]["removeCheckout"]>[0]) =>
+          Ref.update(removedPaths, (paths) => [...paths, path]).pipe(Effect.asVoid),
+      } as never),
+      Effect.provideService(ServerConfig.ServerConfig, {
+        devspacesDir,
+      } as never),
+      Effect.provide(NodeServices.layer),
+    );
+
+    assert.deepStrictEqual(yield* Ref.get(removedPaths), [orphanPath]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );

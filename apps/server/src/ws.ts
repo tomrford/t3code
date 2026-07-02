@@ -3,8 +3,10 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -113,6 +115,9 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
+import { resolvesInsideDirectory } from "./devspace/checkoutPath.ts";
+import { requireValidTurnStartBootstrap } from "./orchestration/commandInvariants.ts";
+import { OrchestrationCommandInvariantError } from "./orchestration/Errors.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -400,6 +405,7 @@ const makeWsRpcLayer = (
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
+      const fileSystem = yield* FileSystem.FileSystem;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
@@ -432,6 +438,7 @@ const makeWsRpcLayer = (
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const devspace = yield* DevspaceCli.DevspaceCli;
+      const path = yield* Path.Path;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
@@ -688,6 +695,8 @@ const makeWsRpcLayer = (
           let targetProjectId = bootstrap?.createThread?.projectId;
           let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
           let targetWorktreePath = bootstrap?.createThread?.worktreePath ?? null;
+          let createdDevspaceCheckoutPath: string | null = null;
+          let recordedDevspaceCheckout = false;
 
           const cleanupCreatedThread = () =>
             createdThread
@@ -700,6 +709,22 @@ const makeWsRpcLayer = (
                     }),
                   ),
                   Effect.ignoreCause({ log: true }),
+                )
+              : Effect.void;
+
+          const cleanupUnrecordedDevspaceCheckout = () =>
+            createdDevspaceCheckoutPath !== null && !recordedDevspaceCheckout
+              ? devspace.removeCheckout({ path: createdDevspaceCheckoutPath }).pipe(
+                  Effect.catchCause((cleanupCause) =>
+                    Effect.logWarning(
+                      "bootstrap turn start failed to remove unrecorded devspace checkout",
+                      {
+                        threadId: command.threadId,
+                        path: createdDevspaceCheckoutPath,
+                        cause: Cause.pretty(cleanupCause),
+                      },
+                    ),
+                  ),
                 )
               : Effect.void;
 
@@ -819,6 +844,8 @@ const makeWsRpcLayer = (
             });
 
           const bootstrapProgram = Effect.gen(function* () {
+            yield* requireValidTurnStartBootstrap(command);
+
             if (bootstrap?.createThread) {
               yield* orchestrationEngine.dispatch({
                 type: "thread.create",
@@ -868,6 +895,71 @@ const makeWsRpcLayer = (
               yield* refreshGitStatus(targetWorktreePath);
             }
 
+            if (bootstrap?.prepareDevspace) {
+              const checkoutPath = path.join(
+                config.devspacesDir,
+                bootstrap.prepareDevspace.repo,
+                command.threadId,
+              );
+              const isInsideDevspacesDir = yield* resolvesInsideDirectory({
+                directory: config.devspacesDir,
+                path: checkoutPath,
+              }).pipe(
+                Effect.provideService(Path.Path, path),
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+              );
+              if (!isInsideDevspacesDir) {
+                return yield* new OrchestrationCommandInvariantError({
+                  commandType: command.type,
+                  detail:
+                    "Thread turn bootstrap devspace checkout path must stay inside devspacesDir.",
+                });
+              }
+              yield* fileSystem.makeDirectory(path.dirname(checkoutPath), { recursive: true });
+              const checkout = yield* devspace.addCheckout({
+                repo: bootstrap.prepareDevspace.repo,
+                rev: bootstrap.prepareDevspace.rev,
+                path: checkoutPath,
+              });
+              const isCanonicalRootInsideDevspacesDir = yield* resolvesInsideDirectory({
+                directory: config.devspacesDir,
+                path: checkout.root,
+              }).pipe(
+                Effect.provideService(Path.Path, path),
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+              );
+              if (!isCanonicalRootInsideDevspacesDir) {
+                yield* devspace.removeCheckout({ path: checkoutPath }).pipe(
+                  Effect.catchCause((cleanupCause) =>
+                    Effect.logWarning(
+                      "bootstrap turn start failed to remove escaped devspace checkout",
+                      {
+                        threadId: command.threadId,
+                        path: checkoutPath,
+                        root: checkout.root,
+                        cause: Cause.pretty(cleanupCause),
+                      },
+                    ),
+                  ),
+                );
+                return yield* new OrchestrationCommandInvariantError({
+                  commandType: command.type,
+                  detail:
+                    "Thread turn bootstrap devspace checkout path must stay inside devspacesDir.",
+                });
+              }
+              createdDevspaceCheckoutPath = checkout.root;
+              targetWorktreePath = checkout.root;
+              yield* orchestrationEngine.dispatch({
+                type: "thread.meta.update",
+                commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
+                threadId: command.threadId,
+                branch: null,
+                worktreePath: targetWorktreePath,
+              });
+              recordedDevspaceCheckout = true;
+            }
+
             yield* runSetupProgram();
 
             return yield* orchestrationEngine.dispatch(finalTurnStartCommand);
@@ -879,7 +971,10 @@ const makeWsRpcLayer = (
               if (Cause.hasInterruptsOnly(cause)) {
                 return Effect.fail(dispatchError);
               }
-              return cleanupCreatedThread().pipe(Effect.flatMap(() => Effect.fail(dispatchError)));
+              return cleanupUnrecordedDevspaceCheckout().pipe(
+                Effect.flatMap(() => cleanupCreatedThread()),
+                Effect.flatMap(() => Effect.fail(dispatchError)),
+              );
             }),
           );
         });

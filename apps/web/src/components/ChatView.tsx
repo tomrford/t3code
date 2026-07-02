@@ -3563,6 +3563,7 @@ function ChatViewContent(props: ChatViewProps) {
   }, []);
 
   const activeWorktreePath = activeThread?.worktreePath ?? null;
+  const isDevspaceProject = activeProject?.devspaceRepo !== undefined;
   const derivedEnvMode: DraftThreadEnvMode = resolveEffectiveEnvMode({
     activeWorktreePath,
     hasServerThread: isServerThread,
@@ -3589,8 +3590,8 @@ function ChatViewContent(props: ChatViewProps) {
         settings.newWorktreesStartFromOrigin)
       : false;
   const sendEnvMode = resolveSendEnvMode({
-    requestedEnvMode: envMode,
-    isGitRepo,
+    requestedEnvMode: isDevspaceProject ? "local" : envMode,
+    isGitRepo: isDevspaceProject ? false : isGitRepo,
   });
 
   useEffect(() => {
@@ -3966,15 +3967,26 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
+    const shouldPrepareDevspace =
+      isFirstMessage &&
+      isLocalDraftThread &&
+      activeProject.devspaceRepo !== undefined &&
+      !activeThread.worktreePath;
     const baseBranchForWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
+      !shouldPrepareDevspace &&
+      isFirstMessage &&
+      sendEnvMode === "worktree" &&
+      !activeThread.worktreePath
         ? activeThreadBranch
         : null;
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
     const shouldCreateWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
+      !shouldPrepareDevspace &&
+      isFirstMessage &&
+      sendEnvMode === "worktree" &&
+      !activeThread.worktreePath;
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
@@ -4133,7 +4145,7 @@ function ChatViewContent(props: ChatViewProps) {
     let turnStartSucceeded = false;
     if (failure === null && turnAttachmentsResult._tag === "Success") {
       const bootstrap =
-        isLocalDraftThread || baseBranchForWorktree
+        isLocalDraftThread || baseBranchForWorktree || shouldPrepareDevspace
           ? {
               ...(isLocalDraftThread
                 ? {
@@ -4147,6 +4159,15 @@ function ChatViewContent(props: ChatViewProps) {
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
                     },
+                  }
+                : {}),
+              ...(shouldPrepareDevspace
+                ? {
+                    prepareDevspace: {
+                      repo: activeProject.devspaceRepo,
+                      rev: "trunk()",
+                    },
+                    runSetupScript: true,
                   }
                 : {}),
               ...(baseBranchForWorktree
@@ -5223,7 +5244,7 @@ function ChatViewContent(props: ChatViewProps) {
                     : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
                 )}
               >
-                {isGitRepo && (
+                {(isGitRepo || isDevspaceProject) && (
                   <div className="pointer-events-auto">
                     <BranchToolbar
                       environmentId={activeThread.environmentId}

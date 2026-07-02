@@ -6290,6 +6290,454 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect(
+    "bootstraps first-send devspace turns on the server before dispatching turn start",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const devspacesDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-devspace-bootstrap-",
+        });
+        const dispatchedCommands: Array<OrchestrationCommand> = [];
+        const addCheckout = vi.fn(
+          (_: Parameters<DevspaceCli.DevspaceCli["Service"]["addCheckout"]>[0]) =>
+            Effect.succeed({
+              root: path.join(devspacesDir, "owner", "repo", "canonical-thread-bootstrap-devspace"),
+              repo: "owner/repo",
+              server: "devspace.example",
+              workspace_id: "workspace-1",
+            }),
+        );
+        const refreshStatus = vi.fn((_: string) =>
+          Effect.succeed({
+            isRepo: false,
+            hasPrimaryRemote: false,
+            isDefaultRef: false,
+            refName: null,
+            hasWorkingTreeChanges: false,
+            workingTree: {
+              files: [],
+              insertions: 0,
+              deletions: 0,
+            },
+            hasUpstream: false,
+            aheadCount: 0,
+            behindCount: 0,
+            pr: null,
+          }),
+        );
+        const runForThread = vi.fn(
+          (
+            _: Parameters<
+              ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
+            >[0],
+          ) =>
+            Effect.succeed({
+              status: "started" as const,
+              scriptId: "setup",
+              scriptName: "Setup",
+              terminalId: "setup-setup",
+              cwd: path.join(devspacesDir, "owner", "repo", "canonical-thread-bootstrap-devspace"),
+            }),
+        );
+
+        yield* buildAppUnderTest({
+          config: {
+            devspacesDir,
+          },
+          layers: {
+            devspaceCli: {
+              addCheckout,
+            },
+            vcsStatusBroadcaster: {
+              refreshStatus,
+            },
+            orchestrationEngine: {
+              dispatch: (command) =>
+                Effect.sync(() => {
+                  dispatchedCommands.push(command);
+                  return { sequence: dispatchedCommands.length };
+                }),
+              readEvents: () => Stream.empty,
+            },
+            projectSetupScriptRunner: {
+              runForThread,
+            },
+          },
+        });
+
+        const createdAt = "2026-01-01T00:00:00.000Z";
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const response = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+              type: "thread.turn.start",
+              commandId: CommandId.make("cmd-bootstrap-turn-start-devspace"),
+              threadId: ThreadId.make("thread-bootstrap-devspace"),
+              message: {
+                messageId: MessageId.make("msg-bootstrap-devspace"),
+                role: "user",
+                text: "hello",
+                attachments: [],
+              },
+              modelSelection: defaultModelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              bootstrap: {
+                createThread: {
+                  projectId: defaultProjectId,
+                  title: "Bootstrap Devspace Thread",
+                  modelSelection: defaultModelSelection,
+                  runtimeMode: "full-access",
+                  interactionMode: "default",
+                  branch: null,
+                  worktreePath: null,
+                  createdAt,
+                },
+                prepareDevspace: {
+                  repo: "owner/repo",
+                  rev: "trunk()",
+                },
+                runSetupScript: true,
+              },
+              createdAt,
+            }),
+          ),
+        );
+
+        const canonicalRoot = path.join(
+          devspacesDir,
+          "owner",
+          "repo",
+          "canonical-thread-bootstrap-devspace",
+        );
+        assert.equal(response.sequence, 5);
+        assert.deepEqual(
+          dispatchedCommands.map((command) => command.type),
+          [
+            "thread.create",
+            "thread.meta.update",
+            "thread.activity.append",
+            "thread.activity.append",
+            "thread.turn.start",
+          ],
+        );
+        assert.deepEqual(addCheckout.mock.calls[0]?.[0], {
+          repo: "owner/repo",
+          rev: "trunk()",
+          path: path.join(devspacesDir, "owner", "repo", "thread-bootstrap-devspace"),
+        });
+        assert.equal(refreshStatus.mock.calls.length, 0);
+        assert.deepEqual(runForThread.mock.calls[0]?.[0], {
+          threadId: ThreadId.make("thread-bootstrap-devspace"),
+          projectId: defaultProjectId,
+          worktreePath: canonicalRoot,
+        });
+
+        const metaUpdate = dispatchedCommands.find(
+          (command): command is Extract<OrchestrationCommand, { type: "thread.meta.update" }> =>
+            command.type === "thread.meta.update",
+        );
+        assert.equal(metaUpdate?.branch, null);
+        assert.equal(metaUpdate?.worktreePath, canonicalRoot);
+        const finalCommand = dispatchedCommands[4];
+        assertTrue(finalCommand?.type === "thread.turn.start");
+        if (finalCommand?.type === "thread.turn.start") {
+          assert.equal(finalCommand.bootstrap, undefined);
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects devspace bootstrap repos that escape devspacesDir", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const devspacesDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-devspace-bootstrap-contained-",
+      });
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const addCheckout = vi.fn(
+        (_: Parameters<DevspaceCli.DevspaceCli["Service"]["addCheckout"]>[0]) =>
+          Effect.die("DevspaceCli.addCheckout should not be called for escaped paths"),
+      );
+
+      yield* buildAppUnderTest({
+        config: {
+          devspacesDir,
+        },
+        layers: {
+          devspaceCli: {
+            addCheckout,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-bootstrap-turn-start-devspace-contained"),
+            threadId: ThreadId.make("thread-bootstrap-devspace-contained"),
+            message: {
+              messageId: MessageId.make("msg-bootstrap-devspace-contained"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "Bootstrap Devspace Thread",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              },
+              prepareDevspace: {
+                repo: "../../escaped",
+                rev: "trunk()",
+              },
+              runSetupScript: false,
+            },
+            createdAt,
+          }),
+        ).pipe(Effect.flip),
+      );
+
+      assert.match(error.message, /devspace checkout path must stay inside devspacesDir/);
+      assert.equal(addCheckout.mock.calls.length, 0);
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["thread.create", "thread.delete"],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects devspace bootstrap checkouts when canonical root escapes devspacesDir", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const devspacesDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-devspace-bootstrap-canonical-contained-",
+      });
+      const outsideDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-devspace-bootstrap-canonical-outside-",
+      });
+      const outsideRoot = path.join(outsideDir, "owner", "repo", "thread-bootstrap-devspace-root");
+      const requestedCheckoutPath = path.join(
+        devspacesDir,
+        "owner",
+        "repo",
+        "thread-bootstrap-devspace-root",
+      );
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const addCheckout = vi.fn(
+        (_: Parameters<DevspaceCli.DevspaceCli["Service"]["addCheckout"]>[0]) =>
+          Effect.succeed({
+            root: outsideRoot,
+            repo: "owner/repo",
+            server: "devspace.example",
+            workspace_id: "workspace-1",
+          }),
+      );
+      const removeCheckout = vi.fn(
+        (_: Parameters<DevspaceCli.DevspaceCli["Service"]["removeCheckout"]>[0]) => Effect.void,
+      );
+
+      yield* buildAppUnderTest({
+        config: {
+          devspacesDir,
+        },
+        layers: {
+          devspaceCli: {
+            addCheckout,
+            removeCheckout,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-bootstrap-turn-start-devspace-root-contained"),
+            threadId: ThreadId.make("thread-bootstrap-devspace-root"),
+            message: {
+              messageId: MessageId.make("msg-bootstrap-devspace-root"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "Bootstrap Devspace Thread",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              },
+              prepareDevspace: {
+                repo: "owner/repo",
+                rev: "trunk()",
+              },
+              runSetupScript: false,
+            },
+            createdAt,
+          }),
+        ).pipe(Effect.flip),
+      );
+
+      assert.match(error.message, /devspace checkout path must stay inside devspacesDir/);
+      assert.deepEqual(addCheckout.mock.calls[0]?.[0], {
+        repo: "owner/repo",
+        rev: "trunk()",
+        path: requestedCheckoutPath,
+      });
+      assert.deepEqual(removeCheckout.mock.calls[0]?.[0], { path: requestedCheckoutPath });
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["thread.create", "thread.delete"],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("removes unrecorded devspace checkouts when bootstrap metadata update fails", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const devspacesDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-devspace-bootstrap-unrecorded-",
+      });
+      const checkoutRoot = path.join(
+        devspacesDir,
+        "owner",
+        "repo",
+        "canonical-thread-bootstrap-unrecorded",
+      );
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const addCheckout = vi.fn(
+        (_: Parameters<DevspaceCli.DevspaceCli["Service"]["addCheckout"]>[0]) =>
+          Effect.succeed({
+            root: checkoutRoot,
+            repo: "owner/repo",
+            server: "devspace.example",
+            workspace_id: "workspace-1",
+          }),
+      );
+      const removeCheckout = vi.fn(
+        (_: Parameters<DevspaceCli.DevspaceCli["Service"]["removeCheckout"]>[0]) => Effect.void,
+      );
+
+      yield* buildAppUnderTest({
+        config: {
+          devspacesDir,
+        },
+        layers: {
+          devspaceCli: {
+            addCheckout,
+            removeCheckout,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return command;
+              }).pipe(
+                Effect.flatMap((dispatchedCommand) =>
+                  dispatchedCommand.type === "thread.meta.update"
+                    ? Effect.fail(
+                        new OrchestrationListenerCallbackError({
+                          listener: "read-model",
+                          detail: "metadata update did not commit",
+                        }),
+                      )
+                    : Effect.succeed({ sequence: dispatchedCommands.length }),
+                ),
+              ),
+            readEvents: () => Stream.empty,
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-bootstrap-turn-start-devspace-unrecorded"),
+            threadId: ThreadId.make("thread-bootstrap-unrecorded"),
+            message: {
+              messageId: MessageId.make("msg-bootstrap-unrecorded"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "Bootstrap Devspace Thread",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              },
+              prepareDevspace: {
+                repo: "owner/repo",
+                rev: "trunk()",
+              },
+              runSetupScript: false,
+            },
+            createdAt,
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["thread.create", "thread.meta.update", "thread.delete"],
+      );
+      assert.deepEqual(removeCheckout.mock.calls[0]?.[0], { path: checkoutRoot });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("records setup-script failures without aborting bootstrap turn start", () =>
     Effect.gen(function* () {
       const dispatchedCommands: Array<OrchestrationCommand> = [];
