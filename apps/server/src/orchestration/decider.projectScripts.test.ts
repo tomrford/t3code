@@ -31,6 +31,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           projectId: asProjectId("project-scripts"),
           title: "Scripts",
           workspaceRoot: "/tmp/scripts",
+          devspaceRepo: "scripts",
           createdAt: now,
         },
         readModel,
@@ -38,6 +39,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
 
       const event = Array.isArray(result) ? result[0] : result;
       expect(event.type).toBe("project.created");
+      expect(event.payload.devspaceRepo).toBe("scripts");
       expect((event.payload as { scripts: unknown[] }).scripts).toEqual([]);
     }),
   );

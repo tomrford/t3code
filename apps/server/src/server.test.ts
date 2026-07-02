@@ -71,6 +71,7 @@ import { vi } from "vite-plus/test";
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import * as ServerConfig from "./config.ts";
+import * as DevspaceCli from "./devspace/DevspaceCli.ts";
 import { makeRoutesLayer } from "./server.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as GitManager from "./git/GitManager.ts";
@@ -326,6 +327,7 @@ const buildAppUnderTest = (options?: {
     sourceControlRepositoryService?: Partial<
       SourceControlRepositoryService.SourceControlRepositoryService["Service"]
     >;
+    devspaceCli?: Partial<DevspaceCli.DevspaceCli["Service"]>;
     reviewService?: Partial<ReviewService.ReviewService["Service"]>;
     vcsStatusBroadcaster?: Partial<VcsStatusBroadcaster.VcsStatusBroadcaster["Service"]>;
     projectSetupScriptRunner?: Partial<
@@ -632,9 +634,19 @@ const buildAppUnderTest = (options?: {
       Layer.provide(reviewLayer),
       Layer.provide(vcsProvisioningLayer),
       Layer.provide(
-        Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
-          ...options?.layers?.sourceControlRepositoryService,
-        }),
+        Layer.mergeAll(
+          Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
+            ...options?.layers?.sourceControlRepositoryService,
+          }),
+          Layer.mock(DevspaceCli.DevspaceCli)({
+            listRepos: () => Effect.succeed([]),
+            addCheckout: () => Effect.die("DevspaceCli.addCheckout not stubbed in this test"),
+            removeCheckout: () => Effect.die("DevspaceCli.removeCheckout not stubbed in this test"),
+            info: () => Effect.die("DevspaceCli.info not stubbed in this test"),
+            listWorkspaces: () => Effect.die("DevspaceCli.listWorkspaces not stubbed in this test"),
+            ...options?.layers?.devspaceCli,
+          }),
+        ),
       ),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provide(

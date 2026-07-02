@@ -14,6 +14,7 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -34,6 +35,7 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReaper.ts";
+import * as DevspaceCli from "./devspace/DevspaceCli.ts";
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -249,6 +251,69 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   } as const;
 });
 
+export const reconcileDevspaceProjects = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
+  const devspace = yield* DevspaceCli.DevspaceCli;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const projectionReadModelQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const serverConfig = yield* ServerConfig.ServerConfig;
+
+  const repos = yield* devspace.listRepos().pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning("devspace project reconciliation skipped", {
+        cause,
+      }).pipe(Effect.as([])),
+    ),
+  );
+  if (repos.length === 0) {
+    return;
+  }
+
+  const readModel = yield* projectionReadModelQuery.getCommandReadModel();
+  const liveDevspaceRepos = new Set(
+    readModel.projects.flatMap((project) =>
+      project.deletedAt === null && project.devspaceRepo !== undefined
+        ? [project.devspaceRepo]
+        : [],
+    ),
+  );
+
+  yield* Effect.forEach(
+    repos,
+    (repo) =>
+      Effect.gen(function* () {
+        if (liveDevspaceRepos.has(repo.name)) {
+          return;
+        }
+
+        const workspaceRoot = path.join(serverConfig.devspacesDir, repo.name);
+        yield* fs.makeDirectory(workspaceRoot, { recursive: true });
+        const uuid = crypto.randomUUIDv4;
+        const createdAt = DateTime.formatIso(yield* DateTime.now);
+        yield* orchestrationEngine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make(`server:devspace-project-create:${yield* uuid}`),
+          projectId: ProjectId.make(yield* uuid),
+          title: repo.name,
+          workspaceRoot,
+          devspaceRepo: repo.name,
+          createdAt,
+        });
+        liveDevspaceRepos.add(repo.name);
+      }).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to materialize devspace repo as project", {
+            repo: repo.name,
+            cause,
+          }),
+        ),
+      ),
+    { concurrency: 1 },
+  );
+});
+
 const resolveStartupBrowserTarget = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
@@ -344,6 +409,19 @@ export const make = Effect.gen(function* () {
         yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
       }),
+    );
+
+    yield* Effect.logDebug("startup phase: reconciling devspace projects");
+    yield* runStartupPhase(
+      "devspace.projects.reconcile",
+      reconcileDevspaceProjects.pipe(
+        Effect.provideService(Crypto.Crypto, crypto),
+        Effect.catch((cause) =>
+          Effect.logWarning("devspace project reconciliation failed", {
+            cause,
+          }),
+        ),
+      ),
     );
 
     const welcomeBase = yield* resolveWelcomeBase;
