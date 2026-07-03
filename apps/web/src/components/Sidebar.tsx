@@ -114,6 +114,7 @@ import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import { projectEnvironment } from "../state/projects";
+import { devspaceEnvironment } from "../state/devspace";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
@@ -1103,6 +1104,25 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
   );
+  const isDevspaceProject = project.devspaceRepo !== undefined;
+  const devspaceRepos = useEnvironmentQuery(
+    isDevspaceProject
+      ? devspaceEnvironment.repos({
+          environmentId: project.environmentId,
+          input: {},
+        })
+      : null,
+  );
+  const missingDevspaceRepos = useMemo(() => {
+    if (!isDevspaceProject || !devspaceRepos.data) {
+      return [];
+    }
+    const availableRepos = new Set(devspaceRepos.data.repos.map((repo) => repo.name));
+    return project.memberProjects
+      .flatMap((member) => (member.devspaceRepo !== undefined ? [member.devspaceRepo] : []))
+      .filter((repo, index, repos) => repos.indexOf(repo) === index && !availableRepos.has(repo));
+  }, [devspaceRepos.data, isDevspaceProject, project.memberProjects]);
+  const hasMissingDevspaceRepo = missingDevspaceRepos.length > 0;
   const appSettingsConfirmThreadDelete = useClientSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
   );
@@ -2206,7 +2226,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           size="sm"
           className={`gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
-          }`}
+          } ${hasMissingDevspaceRepo ? "opacity-55" : ""}`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.listeners : {})}
           onPointerDownCapture={handleProjectButtonPointerDownCapture}
@@ -2251,6 +2271,26 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <span className="shrink-0 text-[10px] text-muted-foreground/60">
                 {project.groupedProjectCount} projects
               </span>
+            ) : null}
+            {hasMissingDevspaceRepo ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      aria-label="Devspace repo missing"
+                      className="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-1 py-0.5 text-[10px] leading-none text-muted-foreground"
+                    />
+                  }
+                >
+                  <TriangleAlertIcon className="size-3" />
+                  <span>Missing</span>
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  {missingDevspaceRepos.length === 1
+                    ? `${missingDevspaceRepos[0]} is not in ds repo list.`
+                    : `${missingDevspaceRepos.length} devspace repos are not in ds repo list.`}
+                </TooltipPopup>
+              </Tooltip>
             ) : null}
           </span>
         </SidebarMenuButton>
