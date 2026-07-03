@@ -7,6 +7,7 @@
 - [ ] Thread archiving
 - [ ] New projects should go on top
 - [ ] Projects should be sorted by latest thread update
+- [ ] Sidebar Devspaces section doesn't reliably reflect devspace add/remove — not worth fixing until the devspace integration goes deeper
 
 ## Bigger things
 
