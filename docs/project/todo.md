@@ -11,3 +11,5 @@
 ## Bigger things
 
 - [ ] Queueing messages
+- [ ] Devspace selector "edit" mode — land inside the selected change instead of on a new child; blocked on `ds add --edit` (tracked in the devspace repo).
+- [ ] Unarchiving a devspace thread whose checkout was cleaned leaves worktreePath dangling; the next turn fails at provider spawn. Needs a guard or re-bootstrap.

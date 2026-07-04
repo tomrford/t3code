@@ -1,4 +1,5 @@
 import {
+  DevspaceBookmarkList,
   DevspaceCheckoutInfo,
   DevspaceCliDecodeError,
   type DevspaceCliError,
@@ -33,6 +34,10 @@ export interface DevspaceListWorkspacesInput {
   readonly repo: string;
 }
 
+export interface DevspaceListBookmarksInput {
+  readonly repo: string;
+}
+
 export class DevspaceCli extends Context.Service<
   DevspaceCli,
   {
@@ -49,6 +54,9 @@ export class DevspaceCli extends Context.Service<
     readonly listWorkspaces: (
       input: DevspaceListWorkspacesInput,
     ) => Effect.Effect<DevspaceWorkspaceList, DevspaceCliError>;
+    readonly listBookmarks: (
+      input: DevspaceListBookmarksInput,
+    ) => Effect.Effect<DevspaceBookmarkList, DevspaceCliError>;
   }
 >()("t3/devspace/DevspaceCli") {}
 
@@ -164,6 +172,35 @@ export const make = Effect.gen(function* () {
           cwd: config.cwd,
         },
         DevspaceWorkspaceList,
+      ),
+    listBookmarks: (input) =>
+      run({
+        operation: "DevspaceCli.listBookmarks",
+        // Skip remote-tracking rows (diverged bookmarks render one row per
+        // remote) and locally-deleted bookmarks, which have no local row.
+        args: ["-R", input.repo, "bookmark", "list", "-T", 'if(remote, "", name ++ "\\n")'],
+        cwd: config.cwd,
+      }).pipe(
+        Effect.map((result) => result.stdout),
+        Effect.flatMap((stdout) =>
+          Schema.decodeUnknownEffect(DevspaceBookmarkList)(
+            stdout
+              .split("\n")
+              .map((line) => line.trim())
+              .filter((line) => line.length > 0),
+          ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new DevspaceCliDecodeError({
+                  operation: "DevspaceCli.listBookmarks",
+                  command,
+                  cwd: config.cwd,
+                  outputLength: stdout.length,
+                  cause,
+                }),
+            ),
+          ),
+        ),
       ),
   });
 });

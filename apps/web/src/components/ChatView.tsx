@@ -134,6 +134,7 @@ import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
 import { RightPanelTabs } from "./RightPanelTabs";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
+import { DEFAULT_DEVSPACE_REV } from "./BranchToolbarDevspaceRevisionSelector";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
@@ -1139,6 +1140,9 @@ function ChatViewContent(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
+  const [pendingServerThreadDevspaceRev, setPendingServerThreadDevspaceRev] = useState<
+    string | null
+  >();
   const [
     pendingServerThreadStartFromOriginByThreadId,
     setPendingServerThreadStartFromOriginByThreadId,
@@ -3583,6 +3587,7 @@ function ChatViewContent(props: ChatViewProps) {
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
+  const activeThreadDevspaceRev = pendingServerThreadDevspaceRev ?? DEFAULT_DEVSPACE_REV;
   const startFromOrigin = isLocalDraftThread
     ? (draftThread?.startFromOrigin ?? false)
     : canOverrideServerThreadEnvMode
@@ -3597,6 +3602,7 @@ function ChatViewContent(props: ChatViewProps) {
   useEffect(() => {
     setPendingServerThreadEnvMode(null);
     setPendingServerThreadBranch(undefined);
+    setPendingServerThreadDevspaceRev(undefined);
   }, [activeThread?.id]);
 
   useEffect(() => {
@@ -3605,6 +3611,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
     setPendingServerThreadEnvMode(null);
     setPendingServerThreadBranch(undefined);
+    setPendingServerThreadDevspaceRev(undefined);
   }, [canOverrideServerThreadEnvMode]);
 
   useEffect(() => {
@@ -3967,11 +3974,11 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
+    // No draft requirement: a server thread whose bootstrap failed (created,
+    // zero messages, no checkout) must be able to re-prepare, matching the
+    // git prepareWorktree conditions and the toolbar's selector gate.
     const shouldPrepareDevspace =
-      isFirstMessage &&
-      isLocalDraftThread &&
-      activeProject.devspaceRepo !== undefined &&
-      !activeThread.worktreePath;
+      isFirstMessage && activeProject.devspaceRepo !== undefined && !activeThread.worktreePath;
     const baseBranchForWorktree =
       !shouldPrepareDevspace &&
       isFirstMessage &&
@@ -4165,7 +4172,7 @@ function ChatViewContent(props: ChatViewProps) {
                 ? {
                     prepareDevspace: {
                       repo: activeProject.devspaceRepo,
-                      rev: "trunk()",
+                      rev: activeThreadDevspaceRev,
                     },
                     runSetupScript: true,
                   }
@@ -5262,6 +5269,8 @@ function ChatViewContent(props: ChatViewProps) {
                             onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
                           }
                         : {})}
+                      activeThreadDevspaceRevOverride={activeThreadDevspaceRev}
+                      onActiveThreadDevspaceRevOverrideChange={setPendingServerThreadDevspaceRev}
                       envLocked={envLocked}
                       onComposerFocusRequest={scheduleComposerFocus}
                       {...(canCheckoutPullRequestIntoThread

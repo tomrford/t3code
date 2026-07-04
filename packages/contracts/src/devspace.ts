@@ -29,6 +29,9 @@ export type DevspaceWorkspace = typeof DevspaceWorkspace.Type;
 export const DevspaceWorkspaceList = Schema.Array(DevspaceWorkspace);
 export type DevspaceWorkspaceList = typeof DevspaceWorkspaceList.Type;
 
+export const DevspaceBookmarkList = Schema.Array(TrimmedNonEmptyString);
+export type DevspaceBookmarkList = typeof DevspaceBookmarkList.Type;
+
 export const DevspaceReposListInput = Schema.Struct({});
 export type DevspaceReposListInput = typeof DevspaceReposListInput.Type;
 
@@ -36,6 +39,17 @@ export const DevspaceReposListResult = Schema.Struct({
   repos: DevspaceRepositoryList,
 });
 export type DevspaceReposListResult = typeof DevspaceReposListResult.Type;
+
+export const DevspaceRefsListInput = Schema.Struct({
+  repo: TrimmedNonEmptyString,
+});
+export type DevspaceRefsListInput = typeof DevspaceRefsListInput.Type;
+
+export const DevspaceRefsListResult = Schema.Struct({
+  bookmarks: DevspaceBookmarkList,
+  workspaceHeads: Schema.Array(TrimmedNonEmptyString),
+});
+export type DevspaceRefsListResult = typeof DevspaceRefsListResult.Type;
 
 export class DevspaceCliUnavailableError extends Schema.TaggedErrorClass<DevspaceCliUnavailableError>()(
   "DevspaceCliUnavailableError",

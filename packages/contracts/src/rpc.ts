@@ -142,7 +142,13 @@ import {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
-import { DevspaceCliError, DevspaceReposListInput, DevspaceReposListResult } from "./devspace.ts";
+import {
+  DevspaceCliError,
+  DevspaceRefsListInput,
+  DevspaceRefsListResult,
+  DevspaceReposListInput,
+  DevspaceReposListResult,
+} from "./devspace.ts";
 import { VcsError } from "./vcs.ts";
 
 export const WS_METHODS = {
@@ -226,6 +232,7 @@ export const WS_METHODS = {
 
   // Devspace methods
   devspaceReposList: "devspace.repos.list",
+  devspaceRefsList: "devspace.refs.list",
 
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
@@ -361,6 +368,12 @@ export const WsSourceControlPublishRepositoryRpc = Rpc.make(
 export const WsDevspaceReposListRpc = Rpc.make(WS_METHODS.devspaceReposList, {
   payload: DevspaceReposListInput,
   success: DevspaceReposListResult,
+  error: Schema.Union([DevspaceCliError, EnvironmentAuthorizationError]),
+});
+
+export const WsDevspaceRefsListRpc = Rpc.make(WS_METHODS.devspaceRefsList, {
+  payload: DevspaceRefsListInput,
+  success: DevspaceRefsListResult,
   error: Schema.Union([DevspaceCliError, EnvironmentAuthorizationError]),
 });
 
@@ -710,6 +723,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsDevspaceReposListRpc,
+  WsDevspaceRefsListRpc,
   WsProjectsListEntriesRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchEntriesRpc,

@@ -14,5 +14,11 @@ export function createDevspaceEnvironmentAtoms<R, E>(
       staleTimeMs: 5_000,
       refreshIntervalMs: 15_000,
     }),
+    refs: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:devspace:refs",
+      tag: WS_METHODS.devspaceRefsList,
+      staleTimeMs: 5_000,
+      refreshIntervalMs: 15_000,
+    }),
   };
 }

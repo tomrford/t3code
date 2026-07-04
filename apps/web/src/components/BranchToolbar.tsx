@@ -22,6 +22,7 @@ import {
   resolveLockedWorkspaceLabel,
 } from "./BranchToolbar.logic";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
+import { BranchToolbarDevspaceRevisionSelector } from "./BranchToolbarDevspaceRevisionSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { Button } from "./ui/button";
@@ -45,6 +46,8 @@ interface BranchToolbarProps {
   effectiveEnvModeOverride?: EnvMode;
   activeThreadBranchOverride?: string | null;
   onActiveThreadBranchOverrideChange?: (branch: string | null) => void;
+  activeThreadDevspaceRevOverride?: string | null;
+  onActiveThreadDevspaceRevOverrideChange?: (rev: string) => void;
   startFromOrigin: boolean;
   onStartFromOriginChange: (startFromOrigin: boolean) => void;
   envLocked: boolean;
@@ -198,6 +201,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   effectiveEnvModeOverride,
   activeThreadBranchOverride,
   onActiveThreadBranchOverrideChange,
+  activeThreadDevspaceRevOverride,
+  onActiveThreadDevspaceRevOverrideChange,
   startFromOrigin,
   onStartFromOriginChange,
   envLocked,
@@ -223,6 +228,14 @@ export const BranchToolbar = memo(function BranchToolbar({
   const hasActiveThread = serverThread !== null || draftThread !== null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   const isDevspaceProject = activeProject?.devspaceRepo !== undefined;
+  const devspaceRepo = activeProject?.devspaceRepo ?? null;
+  const canSelectDevspaceRev = Boolean(
+    isDevspaceProject &&
+    devspaceRepo &&
+    onActiveThreadDevspaceRevOverrideChange &&
+    !activeWorktreePath &&
+    (draftThread != null || serverThread?.messages.length === 0),
+  );
   const effectiveEnvMode =
     effectiveEnvModeOverride ??
     resolveEffectiveEnvMode({
@@ -305,6 +318,18 @@ export const BranchToolbar = memo(function BranchToolbar({
           {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
         />
       )}
+      {canSelectDevspaceRev && devspaceRepo && onActiveThreadDevspaceRevOverrideChange ? (
+        <BranchToolbarDevspaceRevisionSelector
+          className="min-w-0 flex-1 justify-end md:ml-auto md:flex-none"
+          environmentId={environmentId}
+          repo={devspaceRepo}
+          {...(activeThreadDevspaceRevOverride !== undefined
+            ? { value: activeThreadDevspaceRevOverride }
+            : {})}
+          onValueChange={onActiveThreadDevspaceRevOverrideChange}
+          {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+        />
+      ) : null}
     </div>
   );
 });

@@ -306,6 +306,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.sourceControlCloneRepository, AuthOrchestrationOperateScope],
   [WS_METHODS.sourceControlPublishRepository, AuthOrchestrationOperateScope],
   [WS_METHODS.devspaceReposList, AuthOrchestrationReadScope],
+  [WS_METHODS.devspaceRefsList, AuthOrchestrationReadScope],
   [WS_METHODS.projectsListEntries, AuthOrchestrationReadScope],
   [WS_METHODS.projectsReadFile, AuthOrchestrationReadScope],
   [WS_METHODS.projectsSearchEntries, AuthOrchestrationReadScope],
@@ -1424,6 +1425,22 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.devspaceReposList,
             devspace.listRepos().pipe(Effect.map((repos) => ({ repos }))),
+            {
+              "rpc.aggregate": "devspace",
+            },
+          ),
+        [WS_METHODS.devspaceRefsList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.devspaceRefsList,
+            Effect.all({
+              bookmarks: devspace.listBookmarks({ repo: input.repo }),
+              workspaces: devspace.listWorkspaces({ repo: input.repo }),
+            }).pipe(
+              Effect.map(({ bookmarks, workspaces }) => ({
+                bookmarks,
+                workspaceHeads: workspaces.map((workspace) => `${workspace.name}@`),
+              })),
+            ),
             {
               "rpc.aggregate": "devspace",
             },
