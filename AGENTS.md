@@ -55,3 +55,7 @@ Each entry is a symlink to an immutable snapshot managed by `ds context` (grepo-
   examples of idiomatic usage, tests, module structure, and API design.
 - When writing relay infrastructure code with Alchemy, inspect `.repos/alchemy-effect/` for examples of
   idiomatic usage, tests, module structure, and API design.
+
+## Tom's Devspace Fork Notes
+
+This fork adds Devspace mode: projects backed by a devspace server, one disposable `ds` checkout per thread. Fork-specific behavior and operational knowledge live in [DEVSPACE.md](DEVSPACE.md) — keep fork notes there and in this section only, so upstream merges stay clean. This working copy is itself a devspace checkout: plain `git`/`jj` fail here; use `ds` (run `ds skill` to get started) and name your changes.
