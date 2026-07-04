@@ -16,6 +16,8 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "../config.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 
+export const resolveDevspaceCommand = () => process.env.DEVSPACE_BIN ?? "ds";
+
 export interface DevspaceAddCheckoutInput {
   readonly repo: string;
   readonly rev: string;
@@ -83,7 +85,7 @@ const decodeDevspaceJson = <S extends Schema.Codec<unknown, unknown, never, neve
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const vcsProcess = yield* VcsProcess.VcsProcess;
-  const command = process.env.DEVSPACE_BIN ?? "ds";
+  const command = resolveDevspaceCommand();
 
   const run = Effect.fn("DevspaceCli.run")(function* (input: {
     readonly operation: string;

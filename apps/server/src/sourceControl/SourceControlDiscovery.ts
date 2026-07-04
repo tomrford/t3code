@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import { ServerConfig } from "../config.ts";
+import { resolveDevspaceCommand } from "../devspace/DevspaceCli.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { detailFromCause, firstNonEmptyLine } from "./SourceControlProviderDiscovery.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
@@ -50,10 +51,10 @@ const VCS_PROBES: ReadonlyArray<VcsProbe> = [
   {
     kind: "jj",
     label: "Jujutsu",
-    executable: "jj",
+    executable: resolveDevspaceCommand(),
     versionArgs: ["--version"],
-    implemented: false,
-    installHint: "Install Jujutsu with `brew install jj` or from https://github.com/jj-vcs/jj.",
+    implemented: true,
+    installHint: "Install or configure the Devspace `ds` CLI used for Jujutsu workspaces.",
   },
 ];
 

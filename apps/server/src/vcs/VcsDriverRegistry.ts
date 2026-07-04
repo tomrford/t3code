@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer";
 import type { VcsDriverKind, VcsError, VcsRepositoryIdentity } from "@t3tools/contracts";
 import { VcsUnsupportedOperationError } from "@t3tools/contracts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import * as DevspaceVcsDriver from "./DevspaceVcsDriver.ts";
 import * as VcsProjectConfig from "./VcsProjectConfig.ts";
 import * as VcsDriver from "./VcsDriver.ts";
 
@@ -63,8 +64,14 @@ function parseDetectionCacheKey(key: string): {
 export const make = Effect.gen(function* () {
   const projectConfig = yield* VcsProjectConfig.VcsProjectConfig;
   const git = yield* GitVcsDriver.makeVcsDriver;
+  // Kind stays "jj" (the VCS semantics the UI sees); the driver is
+  // devspace-specific because it shells `ds`, the only way to open a
+  // devspace checkout. A plain-jj driver could register under the same
+  // kind later.
+  const jj = yield* DevspaceVcsDriver.makeVcsDriver;
   const drivers: Partial<Record<VcsDriverKind, VcsDriver.VcsDriver["Service"]>> = {
     git,
+    jj,
   };
 
   const get: VcsDriverRegistry["Service"]["get"] = (kind) => {
@@ -106,6 +113,11 @@ export const make = Effect.gen(function* () {
     if (requestedKind !== "auto" && requestedKind !== "unknown") {
       const driver = yield* get(requestedKind);
       return yield* detectWithDriver(requestedKind, driver, input.cwd);
+    }
+
+    const jjDetected = yield* detectWithDriver("jj", jj, input.cwd);
+    if (jjDetected) {
+      return jjDetected;
     }
 
     return yield* detectWithDriver("git", git, input.cwd);
