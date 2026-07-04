@@ -9,8 +9,8 @@ import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 
 export interface HeadlessServeAccessInfo {
   readonly connectionString: string;
-  readonly token: string;
-  readonly pairingUrl: string;
+  readonly token?: string;
+  readonly pairingUrl?: string;
 }
 
 type NetworkInterfacesMap = ReturnType<typeof NodeOS.networkInterfaces>;
@@ -123,10 +123,11 @@ export const formatHeadlessServeOutput = (accessInfo: HeadlessServeAccessInfo): 
   [
     "T3 Code server is ready.",
     `Connection string: ${accessInfo.connectionString}`,
-    `Token: ${accessInfo.token}`,
-    `Pairing URL: ${accessInfo.pairingUrl}`,
+    ...(accessInfo.token && accessInfo.pairingUrl
+      ? [`Token: ${accessInfo.token}`, `Pairing URL: ${accessInfo.pairingUrl}`]
+      : ["Authentication: disabled"]),
     "",
-    renderTerminalQrCode(accessInfo.pairingUrl),
+    renderTerminalQrCode(accessInfo.pairingUrl ?? accessInfo.connectionString),
     "",
   ].join("\n");
 
@@ -138,6 +139,10 @@ export const issueHeadlessServeAccessInfo = Effect.fn("issueHeadlessServeAccessI
     serverConfig.host,
     resolveListeningPort(httpServer.address, serverConfig.port),
   );
+  if (serverConfig.noAuth) {
+    return { connectionString } satisfies HeadlessServeAccessInfo;
+  }
+
   const issued = yield* serverAuth.issueStartupPairingCredential();
 
   return {

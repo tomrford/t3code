@@ -11,11 +11,11 @@ import {
   type AuthEnvironmentScope,
   type AuthPairingLink,
   type AuthPairingCredentialResult,
-  type AuthSessionId,
   type AuthSessionState,
   type ServerAuthDescriptor,
   type ServerAuthSessionMethod,
   type AuthWebSocketTicketResult,
+  AuthSessionId,
 } from "@t3tools/contracts";
 import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
 import * as Context from "effect/Context";
@@ -34,6 +34,7 @@ import * as ServerSecretStore from "./ServerSecretStore.ts";
 import * as SessionStore from "./SessionStore.ts";
 import { verifyRequestDpopProof } from "./dpop.ts";
 import { layerConfig as SqlitePersistenceLayer } from "../persistence/Layers/Sqlite.ts";
+import * as ServerConfig from "../config.ts";
 
 export const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
 export const INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT = "administrative-bootstrap";
@@ -499,6 +500,8 @@ type BootstrapExchangeResult = {
 const AUTHORIZATION_PREFIX = "Bearer ";
 const DPOP_AUTHORIZATION_PREFIX = "DPoP ";
 const WEBSOCKET_TICKET_QUERY_PARAM = "wsTicket";
+const NO_AUTH_SESSION_ID = AuthSessionId.make("unsafe-no-auth");
+const NO_AUTH_SUBJECT = "unsafe-no-auth";
 
 const bySessionPriority = (left: AuthClientSession, right: AuthClientSession) => {
   const leftCanManage = left.scopes.includes(AuthAccessWriteScope);
@@ -559,7 +562,14 @@ export const make = Effect.gen(function* () {
   const sessions = yield* SessionStore.SessionStore;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const crypto = yield* Crypto.Crypto;
+  const config = yield* ServerConfig.ServerConfig;
   const descriptor = yield* policy.getDescriptor();
+  const noAuthSession: AuthenticatedSession = {
+    sessionId: NO_AUTH_SESSION_ID,
+    subject: NO_AUTH_SUBJECT,
+    method: "bearer-access-token",
+    scopes: AuthAdministrativeScopes,
+  };
 
   const authenticateToken = (
     token: string,
@@ -591,6 +601,10 @@ export const make = Effect.gen(function* () {
   const authenticateRequest = (
     request: HttpServerRequest.HttpServerRequest,
   ): Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError> => {
+    if (config.noAuth) {
+      return Effect.succeed(noAuthSession);
+    }
+
     const cookieToken = request.cookies[sessions.cookieName];
     const bearerToken = parseBearerToken(request);
     const dpopToken = parseDpopToken(request);
@@ -631,7 +645,7 @@ export const make = Effect.gen(function* () {
   };
 
   const getSessionState: EnvironmentAuth["Service"]["getSessionState"] = (request) =>
-    authenticateRequest(request).pipe(
+    (config.noAuth ? Effect.succeed(noAuthSession) : authenticateRequest(request)).pipe(
       Effect.map(
         (session) =>
           ({
@@ -916,17 +930,28 @@ export const make = Effect.gen(function* () {
     );
 
   const issueWebSocketTicket: EnvironmentAuth["Service"]["issueWebSocketTicket"] = (session) =>
-    sessions.issueWebSocketToken(session.sessionId).pipe(
-      Effect.mapError((cause) => new ServerAuthWebSocketTokenIssueError({ cause })),
-      Effect.map(
-        (issued) =>
-          ({
-            ticket: issued.token,
-            expiresAt: DateTime.toUtc(issued.expiresAt),
-          }) satisfies AuthWebSocketTicketResult,
-      ),
-      Effect.withSpan("EnvironmentAuth.issueWebSocketTicket"),
-    );
+    config.noAuth
+      ? DateTime.now.pipe(
+          Effect.map(
+            (now) =>
+              ({
+                ticket: "unsafe-no-auth",
+                expiresAt: DateTime.toUtc(DateTime.add(now, { minutes: 5 })),
+              }) satisfies AuthWebSocketTicketResult,
+          ),
+          Effect.withSpan("EnvironmentAuth.issueWebSocketTicket"),
+        )
+      : sessions.issueWebSocketToken(session.sessionId).pipe(
+          Effect.mapError((cause) => new ServerAuthWebSocketTokenIssueError({ cause })),
+          Effect.map(
+            (issued) =>
+              ({
+                ticket: issued.token,
+                expiresAt: DateTime.toUtc(issued.expiresAt),
+              }) satisfies AuthWebSocketTicketResult,
+          ),
+          Effect.withSpan("EnvironmentAuth.issueWebSocketTicket"),
+        );
 
   const authenticateHttpRequest: EnvironmentAuth["Service"]["authenticateHttpRequest"] = (
     request,
@@ -935,6 +960,10 @@ export const make = Effect.gen(function* () {
 
   const authenticateWebSocketUpgrade: EnvironmentAuth["Service"]["authenticateWebSocketUpgrade"] =
     Effect.fn("EnvironmentAuth.authenticateWebSocketUpgrade")(function* (request) {
+      if (config.noAuth) {
+        return noAuthSession;
+      }
+
       const requestUrl = HttpServerRequest.toURL(request);
       if (Option.isSome(requestUrl)) {
         const websocketTicket = requestUrl.value.searchParams.get(WEBSOCKET_TICKET_QUERY_PARAM);
