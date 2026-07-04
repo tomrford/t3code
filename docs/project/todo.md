@@ -4,7 +4,6 @@
 
 - [ ] Submitting new messages should scroll to bottom
 - [ ] Only show last 10 threads for a given project
-- [ ] Thread archiving
 - [ ] New projects should go on top
 - [ ] Projects should be sorted by latest thread update
 - [ ] Sidebar Devspaces section doesn't reliably reflect devspace add/remove — not worth fixing until the devspace integration goes deeper

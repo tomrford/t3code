@@ -17,7 +17,10 @@ import {
   type ThreadDeletionReactorShape,
 } from "../Services/ThreadDeletionReactor.ts";
 
-type ThreadDeletedEvent = Extract<OrchestrationEvent, { type: "thread.deleted" }>;
+type ThreadCleanupEvent = Extract<
+  OrchestrationEvent,
+  { type: "thread.deleted" | "thread.archived" }
+>;
 
 export const logCleanupCauseUnlessInterrupted = <R, E>({
   effect,
@@ -26,7 +29,7 @@ export const logCleanupCauseUnlessInterrupted = <R, E>({
 }: {
   readonly effect: Effect.Effect<void, E, R>;
   readonly message: string;
-  readonly threadId: ThreadDeletedEvent["payload"]["threadId"];
+  readonly threadId: ThreadCleanupEvent["payload"]["threadId"];
 }): Effect.Effect<void, E, R> =>
   effect.pipe(
     Effect.catchCause((cause) => {
@@ -48,21 +51,21 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const devspace = yield* DevspaceCli.DevspaceCli;
 
-  const stopProviderSession = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
+  const stopProviderSession = (threadId: ThreadCleanupEvent["payload"]["threadId"]) =>
     logCleanupCauseUnlessInterrupted({
       effect: providerService.stopSession({ threadId }),
       message: "thread deletion cleanup skipped provider session stop",
       threadId,
     });
 
-  const closeThreadTerminals = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
+  const closeThreadTerminals = (threadId: ThreadCleanupEvent["payload"]["threadId"]) =>
     logCleanupCauseUnlessInterrupted({
       effect: terminalManager.close({ threadId, deleteHistory: true }),
       message: "thread deletion cleanup skipped terminal close",
       threadId,
     });
 
-  const removeDevspaceCheckout = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
+  const removeDevspaceCheckout = (threadId: ThreadCleanupEvent["payload"]["threadId"]) =>
     logCleanupCauseUnlessInterrupted({
       effect: Effect.gen(function* () {
         const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
@@ -82,26 +85,29 @@ const make = Effect.gen(function* () {
 
         yield* devspace.removeCheckout({ path: thread.worktreePath });
       }),
-      message: "thread deletion cleanup skipped devspace checkout removal",
+      message: "thread cleanup skipped devspace checkout removal",
       threadId,
     });
 
-  const processThreadDeleted = Effect.fn("processThreadDeleted")(function* (
-    event: ThreadDeletedEvent,
+  const processThreadCleanup = Effect.fn("processThreadCleanup")(function* (
+    event: ThreadCleanupEvent,
   ) {
     const { threadId } = event.payload;
+    // Archive dispatch also stops the session, but its ordering relative to
+    // this reactor is not guaranteed — stop here first (idempotent) so the
+    // checkout is never removed under a live session.
     yield* stopProviderSession(threadId);
     yield* closeThreadTerminals(threadId);
     yield* removeDevspaceCheckout(threadId);
   });
 
-  const processThreadDeletedSafely = (event: ThreadDeletedEvent) =>
-    processThreadDeleted(event).pipe(
+  const processThreadCleanupSafely = (event: ThreadCleanupEvent) =>
+    processThreadCleanup(event).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
         }
-        return Effect.logWarning("thread deletion reactor failed to process event", {
+        return Effect.logWarning("thread cleanup reactor failed to process event", {
           eventType: event.type,
           threadId: event.payload.threadId,
           cause: Cause.pretty(cause),
@@ -109,12 +115,12 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processThreadDeletedSafely);
+  const worker = yield* makeDrainableWorker(processThreadCleanupSafely);
 
   const start: ThreadDeletionReactorShape["start"] = Effect.fn("start")(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-        if (event.type !== "thread.deleted") {
+        if (event.type !== "thread.deleted" && event.type !== "thread.archived") {
           return Effect.void;
         }
         return worker.enqueue(event);

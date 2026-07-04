@@ -94,10 +94,29 @@ const makeDeletedEvent = (threadId: ThreadId): OrchestrationEvent => ({
   },
 });
 
+const makeArchivedEvent = (threadId: ThreadId): OrchestrationEvent => ({
+  sequence: 1,
+  eventId: EventId.make("event-thread-archived"),
+  aggregateKind: "thread",
+  aggregateId: threadId,
+  occurredAt: TEST_EPOCH,
+  commandId: null,
+  causationEventId: null,
+  correlationId: null,
+  metadata: {},
+  type: "thread.archived",
+  payload: {
+    threadId,
+    archivedAt: TEST_EPOCH,
+    updatedAt: TEST_EPOCH,
+  },
+});
+
 const makeReadModel = (input: {
   readonly devspacesDir: string;
   readonly deletedThreadId: ThreadId;
   readonly worktreePath: string;
+  readonly archived?: boolean;
   readonly sharedByLiveThread?: boolean;
 }): OrchestrationReadModel => {
   const projectId = ProjectId.make("project-devspace");
@@ -132,8 +151,8 @@ const makeReadModel = (input: {
         latestTurn: null,
         createdAt: TEST_EPOCH,
         updatedAt: TEST_EPOCH,
-        archivedAt: null,
-        deletedAt: TEST_EPOCH,
+        archivedAt: input.archived === true ? TEST_EPOCH : null,
+        deletedAt: input.archived === true ? null : TEST_EPOCH,
         messages: [],
         proposedPlans: [],
         activities: [],
@@ -171,28 +190,31 @@ const makeReadModel = (input: {
 const runReactor = (input: {
   readonly readModel: OrchestrationReadModel;
   readonly deletedThreadId: ThreadId;
+  readonly event?: OrchestrationEvent;
   readonly devspacesDir: string;
+  readonly stopSession?: ProviderService["Service"]["stopSession"];
+  readonly closeTerminals?: TerminalManager.TerminalManager["Service"]["close"];
   readonly removeCheckout: DevspaceCli.DevspaceCli["Service"]["removeCheckout"];
 }) =>
   Effect.gen(function* () {
     const eventEnqueued = yield* Deferred.make<void>();
-    const deletedEvent = makeDeletedEvent(input.deletedThreadId);
+    const cleanupEvent = input.event ?? makeDeletedEvent(input.deletedThreadId);
     const dependencies = Layer.mergeAll(
       Layer.mock(OrchestrationEngineService)({
         dispatch: () => Effect.die("dispatch not used by ThreadDeletionReactor test"),
         readEvents: () => Stream.empty,
-        streamDomainEvents: Stream.make(deletedEvent).pipe(
+        streamDomainEvents: Stream.make(cleanupEvent).pipe(
           Stream.concat(
             Stream.fromEffect(Deferred.succeed(eventEnqueued, undefined)).pipe(Stream.drain),
           ),
         ),
       }),
       Layer.mock(ProviderService)({
-        stopSession: () => Effect.void,
+        stopSession: input.stopSession ?? (() => Effect.void),
         streamEvents: Stream.empty,
       }),
       Layer.mock(TerminalManager.TerminalManager)({
-        close: () => Effect.void,
+        close: input.closeTerminals ?? (() => Effect.void),
       }),
       Layer.mock(ProjectionSnapshotQuery)({
         getCommandReadModel: () => Effect.succeed(input.readModel),
@@ -267,6 +289,43 @@ describe("ThreadDeletionReactor", () => {
       });
 
       expect(removeCheckout).toHaveBeenCalledWith({ path: worktreePath });
+    }),
+  );
+
+  effectIt.effect("removes an unshared archived devspace thread checkout", () =>
+    Effect.gen(function* () {
+      const devspacesDir = "/tmp/t3-thread-deletion-reactor-devspaces";
+      const archivedThreadId = ThreadId.make("thread-archived");
+      const worktreePath = `${devspacesDir}/owner/repo/thread-archived`;
+      const stopSession = vi.fn<ProviderService["Service"]["stopSession"]>(() => Effect.void);
+      const closeTerminals = vi.fn<TerminalManager.TerminalManager["Service"]["close"]>(
+        () => Effect.void,
+      );
+      const removeCheckout = vi.fn<DevspaceCli.DevspaceCli["Service"]["removeCheckout"]>(
+        () => Effect.void,
+      );
+
+      yield* runReactor({
+        readModel: makeReadModel({
+          devspacesDir,
+          deletedThreadId: archivedThreadId,
+          worktreePath,
+          archived: true,
+        }),
+        deletedThreadId: archivedThreadId,
+        event: makeArchivedEvent(archivedThreadId),
+        devspacesDir,
+        stopSession,
+        closeTerminals,
+        removeCheckout,
+      });
+
+      expect(removeCheckout).toHaveBeenCalledWith({ path: worktreePath });
+      expect(stopSession).toHaveBeenCalledWith({ threadId: archivedThreadId });
+      expect(closeTerminals).toHaveBeenCalledWith({
+        threadId: archivedThreadId,
+        deleteHistory: true,
+      });
     }),
   );
 
