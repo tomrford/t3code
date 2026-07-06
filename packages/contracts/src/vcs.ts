@@ -58,6 +58,10 @@ export const VcsListRemotesResult = Schema.Struct({
 });
 export type VcsListRemotesResult = typeof VcsListRemotesResult.Type;
 
+export interface VcsRemoteStatusOptions {
+  readonly refreshUpstream?: boolean;
+}
+
 export interface VcsProcessErrorContext {
   readonly operation: string;
   readonly command: string;

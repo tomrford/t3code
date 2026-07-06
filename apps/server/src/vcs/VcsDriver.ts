@@ -4,12 +4,26 @@ import type * as Effect from "effect/Effect";
 import type {
   VcsDriverCapabilities,
   VcsError,
+  VcsCreateRefInput,
+  VcsCreateRefResult,
+  VcsCreateWorktreeInput,
+  VcsCreateWorktreeResult,
   VcsInitInput,
+  VcsListRefsInput,
+  VcsListRefsResult,
   VcsListRemotesResult,
   VcsListWorkspaceFilesResult,
+  VcsPullResult,
+  VcsRemoteStatusOptions,
   ReviewDiffPreviewInput,
   ReviewDiffPreviewResult,
+  VcsRemoveWorktreeInput,
   VcsRepositoryIdentity,
+  VcsStatusInput,
+  VcsStatusLocalResult,
+  VcsStatusRemoteResult,
+  VcsSwitchRefInput,
+  VcsSwitchRefResult,
 } from "@t3tools/contracts";
 import { CheckpointRef } from "@t3tools/contracts";
 import * as VcsProcess from "./VcsProcess.ts";
@@ -73,6 +87,19 @@ export class VcsDriver extends Context.Service<
       relativePaths: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyArray<string>, VcsError>;
     readonly initRepository: (input: VcsInitInput) => Effect.Effect<void, VcsError>;
+    readonly localStatus?: (input: VcsStatusInput) => Effect.Effect<VcsStatusLocalResult, VcsError>;
+    readonly remoteStatus?: (
+      input: VcsStatusInput,
+      options?: VcsRemoteStatusOptions,
+    ) => Effect.Effect<VcsStatusRemoteResult | null, VcsError>;
+    readonly listRefs?: (input: VcsListRefsInput) => Effect.Effect<VcsListRefsResult, VcsError>;
+    readonly pullCurrentBranch?: (cwd: string) => Effect.Effect<VcsPullResult, VcsError>;
+    readonly createWorktree?: (
+      input: VcsCreateWorktreeInput,
+    ) => Effect.Effect<VcsCreateWorktreeResult, VcsError>;
+    readonly removeWorktree?: (input: VcsRemoveWorktreeInput) => Effect.Effect<void, VcsError>;
+    readonly createRef?: (input: VcsCreateRefInput) => Effect.Effect<VcsCreateRefResult, VcsError>;
+    readonly switchRef?: (input: VcsSwitchRefInput) => Effect.Effect<VcsSwitchRefResult, VcsError>;
     readonly getDiffPreview?: (
       input: ReviewDiffPreviewInput,
     ) => Effect.Effect<ReviewDiffPreviewResult, VcsError>;

@@ -73,6 +73,117 @@ describe("DevspaceVcsDriver", () => {
     );
   });
 
+  it.effect("reads local status through ds status", () => {
+    const calls: VcsProcessInput[] = [];
+
+    return Effect.gen(function* () {
+      const driver = yield* DevspaceVcsDriver.makeVcsDriverShape();
+      const localStatus = driver.localStatus;
+      if (!localStatus) {
+        throw new Error("expected DevspaceVcsDriver.localStatus");
+      }
+      const result = yield* localStatus({ cwd: "/repo" });
+
+      assert.equal(result.isRepo, true);
+      assert.equal(result.refName, "feature/demo");
+      assert.equal(result.hasPrimaryRemote, true);
+      assert.equal(result.hasWorkingTreeChanges, true);
+      assert.deepStrictEqual(result.workingTree.files, [
+        { path: "src/index.ts", insertions: 0, deletions: 0 },
+        { path: "README.md", insertions: 0, deletions: 0 },
+      ]);
+      assert.deepStrictEqual(
+        commandCalls(calls)
+          .map((call) => call.join(" "))
+          .toSorted(),
+        [
+          "ds git remote list",
+          'ds log -r @ --no-graph -T bookmarks.map(|b| b.name()).join("\\n")',
+          "ds status",
+        ],
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NodeServices.layer,
+          Layer.mock(VcsProcess.VcsProcess)({
+            run: (input) =>
+              Effect.sync(() => {
+                calls.push(input);
+                if (input.args[0] === "status") {
+                  return processOutput("M src/index.ts\nA README.md\n");
+                }
+                if (input.args[0] === "log") {
+                  return processOutput("feature/demo\n");
+                }
+                if (input.args.join(" ") === "git remote list") {
+                  return processOutput("origin git@example.com:repo.git\n");
+                }
+                return processOutput("");
+              }),
+          }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("lists refs through ds bookmark list", () => {
+    const calls: VcsProcessInput[] = [];
+
+    return Effect.gen(function* () {
+      const driver = yield* DevspaceVcsDriver.makeVcsDriverShape();
+      const listRefs = driver.listRefs;
+      if (!listRefs) {
+        throw new Error("expected DevspaceVcsDriver.listRefs");
+      }
+      const result = yield* listRefs({ cwd: "/repo", query: "feature" });
+
+      assert.equal(result.isRepo, true);
+      assert.equal(result.hasPrimaryRemote, true);
+      assert.equal(result.totalCount, 1);
+      assert.deepStrictEqual(result.refs, [
+        {
+          name: "feature/demo",
+          current: true,
+          isDefault: false,
+          worktreePath: null,
+        },
+      ]);
+      assert.deepStrictEqual(
+        commandCalls(calls)
+          .map((call) => call.join(" "))
+          .toSorted(),
+        [
+          "ds bookmark list",
+          "ds git remote list",
+          'ds log -r @ --no-graph -T bookmarks.map(|b| b.name()).join("\\n")',
+        ],
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NodeServices.layer,
+          Layer.mock(VcsProcess.VcsProcess)({
+            run: (input) =>
+              Effect.sync(() => {
+                calls.push(input);
+                if (input.args[0] === "bookmark") {
+                  return processOutput("main: qpvuntsm default\nfeature/demo: zzzzzzzz work\n");
+                }
+                if (input.args[0] === "log") {
+                  return processOutput("feature/demo\n");
+                }
+                if (input.args.join(" ") === "git remote list") {
+                  return processOutput("origin git@example.com:repo.git\n");
+                }
+                return processOutput("");
+              }),
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("uses a synthetic git dir for the isolated ignore fallback", () => {
     const calls: VcsProcessInput[] = [];
 

@@ -4,13 +4,20 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import { VcsProcessExitError, VcsUnsupportedOperationError } from "@t3tools/contracts";
+import {
+  type VcsListRefsInput,
+  VcsProcessExitError,
+  VcsUnsupportedOperationError,
+} from "@t3tools/contracts";
 import { resolveDevspaceCommand } from "../devspace/DevspaceCli.ts";
 import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
+const STATUS_MAX_OUTPUT_BYTES = 1024 * 1024;
+const BOOKMARKS_MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
+const CURRENT_BOOKMARK_TEMPLATE = 'bookmarks.map(|b| b.name()).join("\\n")';
 
 const nowFreshness = Effect.fn("DevspaceVcsDriver.nowFreshness")(function* () {
   const now = yield* DateTime.now;
@@ -60,6 +67,79 @@ function parseDevspaceRemoteList(output: string): Array<{ name: string; url: str
       const url = urlParts.join(" ").trim();
       return name && url ? [{ name, url }] : [];
     });
+}
+
+function parseDevspaceStatusFiles(output: string) {
+  return output
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .flatMap((line) => {
+      const match = /^([A-Z?!]{1,2})\s+(.+)$/.exec(line);
+      if (!match) {
+        return [];
+      }
+      const path = match[2]?.trim();
+      return path ? [{ path, insertions: 0, deletions: 0 }] : [];
+    });
+}
+
+function parseCurrentBookmarks(output: string): string[] {
+  return output
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function parseBookmarkLine(line: string): { name: string; current: boolean } | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  const current = trimmed.startsWith("*");
+  const normalized = current ? trimmed.slice(1).trim() : trimmed;
+  const colonIndex = normalized.indexOf(":");
+  const name = (colonIndex === -1 ? normalized.split(/\s+/g)[0] : normalized.slice(0, colonIndex))
+    ?.trim()
+    .replace(/\*$/g, "");
+  return name ? { name, current } : null;
+}
+
+function filterRefsForListQuery(
+  refs: ReadonlyArray<{
+    readonly name: string;
+    readonly isRemote?: boolean;
+    readonly remoteName?: string;
+    readonly current: boolean;
+    readonly isDefault: boolean;
+    readonly worktreePath: string | null;
+  }>,
+  input: VcsListRefsInput,
+) {
+  const query = input.query?.toLowerCase();
+  const filteredByKind =
+    input.refKind === "local"
+      ? refs.filter((ref) => !ref.isRemote)
+      : input.refKind === "remote"
+        ? refs.filter((ref) => ref.isRemote)
+        : refs;
+  const filtered = query
+    ? filteredByKind.filter((ref) => ref.name.toLowerCase().includes(query))
+    : filteredByKind;
+  const cursor = input.cursor ?? 0;
+  const limit = input.limit ?? 50;
+  const page = filtered.slice(cursor, cursor + limit);
+  const nextCursor = cursor + page.length < filtered.length ? cursor + page.length : null;
+  return {
+    refs: page,
+    nextCursor,
+    totalCount: filtered.length,
+  };
+}
+
+function remoteNameForBookmark(name: string): string | undefined {
+  const atIndex = name.lastIndexOf("@");
+  if (atIndex <= 0 || atIndex === name.length - 1) {
+    return undefined;
+  }
+  return name.slice(atIndex + 1);
 }
 
 function chunkPathsForCheckIgnore(relativePaths: ReadonlyArray<string>): string[][] {
@@ -162,14 +242,11 @@ export const makeVcsDriverShape = Effect.fn("makeDevspaceVcsDriverShape")(functi
   const capabilities = {
     kind: "jj" as const,
     supportsWorktrees: false,
-    supportsBookmarks: false,
+    supportsBookmarks: true,
     supportsAtomicSnapshot: false,
     supportsPushDefaultRemote: false,
     ignoreClassifier: "git-compatible-fallback" as const,
   };
-
-  // TODO(jj): add a typed JJ extension service for changes, bookmarks, workspaces,
-  // operation log, and evolution primitives once phase 2 moves beyond VcsDriver.
 
   const isInsideWorkTree: VcsDriver.VcsDriver["Service"]["isInsideWorkTree"] = (cwd) =>
     dsCommand(vcsProcess, command, "DevspaceVcsDriver.isInsideWorkTree", cwd, ["root"], {
@@ -321,6 +398,153 @@ export const makeVcsDriverShape = Effect.fn("makeDevspaceVcsDriverShape")(functi
     };
   });
 
+  const readCurrentBookmarks = Effect.fn("DevspaceVcsDriver.readCurrentBookmarks")(function* (
+    cwd: string,
+  ) {
+    const result = yield* dsCommand(
+      vcsProcess,
+      command,
+      "DevspaceVcsDriver.readCurrentBookmarks",
+      cwd,
+      ["log", "-r", "@", "--no-graph", "-T", CURRENT_BOOKMARK_TEMPLATE],
+      {
+        allowNonZeroExit: true,
+        timeoutMs: 5_000,
+        maxOutputBytes: 64 * 1024,
+      },
+    );
+
+    return result.exitCode === 0 ? parseCurrentBookmarks(result.stdout) : [];
+  });
+
+  const localStatus: VcsDriver.VcsDriver["Service"]["localStatus"] = Effect.fn(
+    "DevspaceVcsDriver.localStatus",
+  )(function* (input) {
+    const [statusResult, currentBookmarks, remotes] = yield* Effect.all(
+      [
+        dsCommand(
+          vcsProcess,
+          command,
+          "DevspaceVcsDriver.localStatus.status",
+          input.cwd,
+          ["status"],
+          {
+            allowNonZeroExit: true,
+            timeoutMs: 10_000,
+            maxOutputBytes: STATUS_MAX_OUTPUT_BYTES,
+          },
+        ),
+        readCurrentBookmarks(input.cwd).pipe(Effect.orElseSucceed(() => [])),
+        listRemotes(input.cwd).pipe(
+          Effect.map((result) => result.remotes),
+          Effect.orElseSucceed(() => []),
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    if (statusResult.exitCode !== 0) {
+      return yield* new VcsProcessExitError({
+        operation: "DevspaceVcsDriver.localStatus",
+        command: `${command} status`,
+        cwd: input.cwd,
+        exitCode: statusResult.exitCode,
+        detail: statusResult.stderr.trim() || "ds status failed",
+      });
+    }
+
+    const files = parseDevspaceStatusFiles(statusResult.stdout);
+    const refName = currentBookmarks[0] ?? null;
+    return {
+      isRepo: true,
+      hasPrimaryRemote: remotes.some((remote) => remote.name === "origin"),
+      isDefaultRef: refName === "main" || refName === "master",
+      refName,
+      hasWorkingTreeChanges: files.length > 0,
+      workingTree: {
+        files,
+        insertions: 0,
+        deletions: 0,
+      },
+    };
+  });
+
+  const remoteStatus: VcsDriver.VcsDriver["Service"]["remoteStatus"] = () => Effect.succeed(null);
+
+  const listRefs: VcsDriver.VcsDriver["Service"]["listRefs"] = Effect.fn(
+    "DevspaceVcsDriver.listRefs",
+  )(function* (input) {
+    const [bookmarkResult, currentBookmarks, remotes] = yield* Effect.all(
+      [
+        dsCommand(
+          vcsProcess,
+          command,
+          "DevspaceVcsDriver.listRefs.bookmarkList",
+          input.cwd,
+          ["bookmark", "list"],
+          {
+            allowNonZeroExit: true,
+            timeoutMs: 10_000,
+            maxOutputBytes: BOOKMARKS_MAX_OUTPUT_BYTES,
+          },
+        ),
+        readCurrentBookmarks(input.cwd).pipe(Effect.orElseSucceed(() => [])),
+        listRemotes(input.cwd).pipe(
+          Effect.map((result) => result.remotes),
+          Effect.orElseSucceed(() => []),
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    if (bookmarkResult.exitCode !== 0) {
+      return yield* new VcsProcessExitError({
+        operation: "DevspaceVcsDriver.listRefs",
+        command: `${command} bookmark list`,
+        cwd: input.cwd,
+        exitCode: bookmarkResult.exitCode,
+        detail: bookmarkResult.stderr.trim() || "ds bookmark list failed",
+      });
+    }
+
+    const currentBookmarkSet = new Set(currentBookmarks);
+    const refs = bookmarkResult.stdout
+      .split(/\r?\n/g)
+      .flatMap((line) => {
+        const parsed = parseBookmarkLine(line);
+        if (!parsed) return [];
+        const remoteName = remoteNameForBookmark(parsed.name);
+        return [
+          {
+            name: parsed.name,
+            ...(remoteName === undefined
+              ? {}
+              : {
+                  isRemote: true,
+                  remoteName,
+                }),
+            current: parsed.current || currentBookmarkSet.has(parsed.name),
+            isDefault: parsed.name === "main" || parsed.name === "master",
+            worktreePath: null,
+          },
+        ];
+      })
+      .toSorted((a, b) => {
+        const aPriority = a.current ? 0 : a.isDefault ? 1 : 2;
+        const bPriority = b.current ? 0 : b.isDefault ? 1 : 2;
+        return aPriority === bPriority ? a.name.localeCompare(b.name) : aPriority - bPriority;
+      });
+    const paginated = filterRefsForListQuery(refs, input);
+
+    return {
+      refs: paginated.refs,
+      isRepo: true,
+      hasPrimaryRemote: remotes.some((remote) => remote.name === "origin"),
+      nextCursor: paginated.nextCursor,
+      totalCount: paginated.totalCount,
+    };
+  });
+
   const filterIgnoredPaths: VcsDriver.VcsDriver["Service"]["filterIgnoredPaths"] = Effect.fn(
     "DevspaceVcsDriver.filterIgnoredPaths",
   )(function* (cwd, relativePaths) {
@@ -424,6 +648,9 @@ export const makeVcsDriverShape = Effect.fn("makeDevspaceVcsDriverShape")(functi
     listRemotes,
     filterIgnoredPaths,
     initRepository,
+    localStatus,
+    remoteStatus,
+    listRefs,
   } satisfies VcsDriver.VcsDriver["Service"];
 });
 

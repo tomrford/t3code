@@ -13,7 +13,6 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 import type {
-  GitManagerServiceError,
   VcsStatusInput,
   VcsStatusLocalResult,
   VcsStatusRemoteResult,
@@ -22,7 +21,7 @@ import type {
 } from "@t3tools/contracts";
 import { mergeGitStatusParts } from "@t3tools/shared/git";
 
-import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as VcsWorkflowService from "./VcsWorkflowService.ts";
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
@@ -156,15 +155,17 @@ export class VcsStatusBroadcaster extends Context.Service<
   {
     readonly getStatus: (
       input: VcsStatusInput,
-    ) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
+    ) => Effect.Effect<VcsStatusResult, VcsWorkflowService.VcsWorkflowError>;
     readonly refreshLocalStatus: (
       cwd: string,
-    ) => Effect.Effect<VcsStatusLocalResult, GitManagerServiceError>;
-    readonly refreshStatus: (cwd: string) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
+    ) => Effect.Effect<VcsStatusLocalResult, VcsWorkflowService.VcsWorkflowError>;
+    readonly refreshStatus: (
+      cwd: string,
+    ) => Effect.Effect<VcsStatusResult, VcsWorkflowService.VcsWorkflowError>;
     readonly streamStatus: (
       input: VcsStatusInput,
       options?: StreamStatusOptions,
-    ) => Stream.Stream<VcsStatusStreamEvent, GitManagerServiceError>;
+    ) => Stream.Stream<VcsStatusStreamEvent, VcsWorkflowService.VcsWorkflowError>;
   }
 >()("t3/vcs/VcsStatusBroadcaster") {}
 
@@ -179,7 +180,7 @@ const normalizeCwd = (cwd: string) =>
   );
 
 export const make = Effect.gen(function* () {
-  const workflow = yield* GitWorkflowService.GitWorkflowService;
+  const workflow = yield* VcsWorkflowService.VcsWorkflowService;
   const fs = yield* FileSystem.FileSystem;
   const changesPubSub = yield* Effect.acquireRelease(
     PubSub.unbounded<VcsStatusChange>(),
