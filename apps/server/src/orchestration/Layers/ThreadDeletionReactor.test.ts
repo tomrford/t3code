@@ -221,6 +221,7 @@ const runReactor = (input: {
       }),
       Layer.mock(DevspaceCli.DevspaceCli)({
         removeCheckout: input.removeCheckout,
+        readSkillGuide: () => Effect.die("DevspaceCli.readSkillGuide not stubbed in this test"),
       }),
       Layer.succeed(ServerConfig.ServerConfig, makeServerConfig(input.devspacesDir)),
       NodeServices.layer,

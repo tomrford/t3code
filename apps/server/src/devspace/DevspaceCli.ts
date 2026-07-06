@@ -59,6 +59,7 @@ export class DevspaceCli extends Context.Service<
     readonly listBookmarks: (
       input: DevspaceListBookmarksInput,
     ) => Effect.Effect<DevspaceBookmarkList, DevspaceCliError>;
+    readonly readSkillGuide: () => Effect.Effect<string, DevspaceCliError>;
   }
 >()("t3/devspace/DevspaceCli") {}
 
@@ -86,6 +87,7 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const vcsProcess = yield* VcsProcess.VcsProcess;
   const command = resolveDevspaceCommand();
+  let skillGuideCache: string | undefined;
 
   const run = Effect.fn("DevspaceCli.run")(function* (input: {
     readonly operation: string;
@@ -204,6 +206,19 @@ export const make = Effect.gen(function* () {
           ),
         ),
       ),
+    readSkillGuide: () =>
+      skillGuideCache !== undefined
+        ? Effect.succeed(skillGuideCache)
+        : run({
+            operation: "DevspaceCli.readSkillGuide",
+            args: ["skill"],
+            cwd: config.cwd,
+          }).pipe(
+            Effect.map((result) => {
+              skillGuideCache = result.stdout.trim();
+              return skillGuideCache;
+            }),
+          ),
   });
 });
 

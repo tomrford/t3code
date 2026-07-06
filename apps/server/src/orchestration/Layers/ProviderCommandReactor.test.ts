@@ -32,6 +32,7 @@ import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
+import * as DevspaceCli from "../../devspace/DevspaceCli.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
@@ -366,6 +367,11 @@ describe("ProviderCommandReactor", () => {
         Layer.mock(TextGeneration, {
           generateBranchName,
           generateThreadTitle,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.mock(DevspaceCli.DevspaceCli)({
+          readSkillGuide: () => Effect.succeed("Devspace test guide"),
         }),
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),

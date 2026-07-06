@@ -1402,6 +1402,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(input.devspaceBriefing
+            ? { developerInstructionsAppend: input.devspaceBriefing }
+            : {}),
           ...(mcpSession
             ? {
                 environment: {

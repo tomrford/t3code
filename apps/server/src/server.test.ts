@@ -646,6 +646,7 @@ const buildAppUnderTest = (options?: {
             info: () => Effect.die("DevspaceCli.info not stubbed in this test"),
             listWorkspaces: () => Effect.die("DevspaceCli.listWorkspaces not stubbed in this test"),
             listBookmarks: () => Effect.die("DevspaceCli.listBookmarks not stubbed in this test"),
+            readSkillGuide: () => Effect.die("DevspaceCli.readSkillGuide not stubbed in this test"),
             ...options?.layers?.devspaceCli,
           }),
         ),

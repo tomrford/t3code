@@ -8,6 +8,7 @@ This fork integrates [Devspace](https://github.com/tomrford/devspace) — a jj-n
 - The first message on a draft devspace thread runs `ds add` into `<base-dir>/devspaces/<repo>/<thread-id>`. The base revision comes from the toolbar selector: `trunk()` by default, or a bookmark, a `workspace@` head, or a free-text change ID/revset (resolved server-side by `ds add -r`; refs served by the `devspace.refs.list` WS method). Always a fresh checkout.
 - Deleting or archiving a thread removes its checkout when no other live thread shares it (`ThreadDeletionReactor` + `checkoutCleanup.ts`). Archived threads are non-messageable while archived; un-archiving a cleaned thread leaves a dangling `worktreePath` (tracked in `docs/project/todo.md`).
 - `DevspaceVcsDriver` (`apps/server/src/vcs/`) registers under the `jj` driver kind and shells `ds` for every operation — devspace checkouts have a devspace commit backend that plain `jj` cannot open, and their `.git` is a read-only Nix-compat shim that must not be claimed by git detection (detection probes `ds root` before git).
+- Codex and Claude sessions for devspace-backed projects append a Devspace checkout briefing plus the cached `ds skill` guide to their provider instructions.
 - `serve --no-auth` (or `T3CODE_NO_AUTH=1`) disables pairing entirely; acceptable only on the private tailnet.
 
 ## Operating it

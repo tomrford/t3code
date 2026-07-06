@@ -26,6 +26,8 @@ import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import * as DevspaceCli from "../../devspace/DevspaceCli.ts";
+import { buildDevspaceSessionBriefing } from "../../devspace/DevspaceSessionInstructions.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
@@ -192,6 +194,7 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
+  const devspaceCli = yield* DevspaceCli.DevspaceCli;
   const gitWorkflow = yield* GitWorkflowService;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
@@ -471,18 +474,37 @@ const make = Effect.gen(function* () {
       projects: project ? [project] : [],
     });
 
+    const resolveDevspaceBriefing = (devspaceRepo: string | undefined) =>
+      devspaceRepo === undefined
+        ? Effect.sync((): string | undefined => undefined)
+        : devspaceCli.readSkillGuide().pipe(
+            Effect.map(buildDevspaceSessionBriefing),
+            Effect.catch((error) =>
+              Effect.logWarning("devspace session briefing skipped", {
+                threadId,
+                devspaceRepo,
+                error,
+              }).pipe(Effect.as(undefined)),
+            ),
+          );
+
     const startProviderSession = (input?: {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderDriverKind;
     }) =>
-      providerService.startSession(threadId, {
-        threadId,
-        ...(preferredProvider ? { provider: preferredProvider } : {}),
-        providerInstanceId: desiredInstanceId,
-        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-        modelSelection: desiredModelSelection,
-        ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
-        runtimeMode: desiredRuntimeMode,
+      Effect.gen(function* () {
+        const devspaceBriefing = yield* resolveDevspaceBriefing(project?.devspaceRepo);
+        return yield* providerService.startSession(threadId, {
+          threadId,
+          ...(preferredProvider ? { provider: preferredProvider } : {}),
+          providerInstanceId: desiredInstanceId,
+          ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+          ...(project?.devspaceRepo ? { devspaceRepo: project.devspaceRepo } : {}),
+          ...(devspaceBriefing ? { devspaceBriefing } : {}),
+          modelSelection: desiredModelSelection,
+          ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+          runtimeMode: desiredRuntimeMode,
+        });
       });
 
     const bindSessionToThread = (session: ProviderSession) =>

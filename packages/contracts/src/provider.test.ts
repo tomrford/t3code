@@ -26,6 +26,7 @@ describe("ProviderSessionStartInput", () => {
       threadId: "thread-1",
       provider: "codex",
       cwd: "/tmp/workspace",
+      devspaceRepo: "owner/repo",
       modelSelection: {
         provider: "codex",
         model: "gpt-5.3-codex",
@@ -37,6 +38,7 @@ describe("ProviderSessionStartInput", () => {
       runtimeMode: "full-access",
     });
     expect(parsed.runtimeMode).toBe("full-access");
+    expect(parsed.devspaceRepo).toBe("owner/repo");
     expect(parsed.modelSelection?.instanceId).toBe("codex");
     expect(parsed.modelSelection?.model).toBe("gpt-5.3-codex");
     expect(getOptionValue(parsed.modelSelection?.options, "reasoningEffort")).toBe("high");
