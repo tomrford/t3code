@@ -282,6 +282,7 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
         prepareDevspace: {
           repo: "owner/repo",
           rev: "trunk()",
+          edit: true,
         },
         runSetupScript: true,
       },
@@ -290,8 +291,34 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
     assert.strictEqual(parsed.bootstrap?.createThread?.projectId, "project-1");
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.baseBranch, "main");
     assert.strictEqual(parsed.bootstrap?.prepareDevspace?.repo, "owner/repo");
+    assert.strictEqual(parsed.bootstrap?.prepareDevspace?.edit, true);
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.startFromOrigin, true);
     assert.strictEqual(parsed.bootstrap?.runSetupScript, true);
+  }),
+);
+
+it.effect("defaults an omitted devspace edit mode to a fresh child", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-devspace-mode",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-devspace-mode",
+        role: "user",
+        text: "hello",
+        attachments: [],
+      },
+      bootstrap: {
+        prepareDevspace: {
+          repo: "owner/repo",
+          rev: "trunk()",
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.bootstrap?.prepareDevspace?.edit, false);
   }),
 );
 

@@ -48,6 +48,8 @@ interface BranchToolbarProps {
   onActiveThreadBranchOverrideChange?: (branch: string | null) => void;
   activeThreadDevspaceRevOverride?: string | null;
   onActiveThreadDevspaceRevOverrideChange?: (rev: string) => void;
+  activeThreadDevspaceEdit: boolean;
+  onActiveThreadDevspaceEditChange: (edit: boolean) => void;
   startFromOrigin: boolean;
   onStartFromOriginChange: (startFromOrigin: boolean) => void;
   envLocked: boolean;
@@ -203,6 +205,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   onActiveThreadBranchOverrideChange,
   activeThreadDevspaceRevOverride,
   onActiveThreadDevspaceRevOverrideChange,
+  activeThreadDevspaceEdit,
+  onActiveThreadDevspaceEditChange,
   startFromOrigin,
   onStartFromOriginChange,
   envLocked,
@@ -326,7 +330,9 @@ export const BranchToolbar = memo(function BranchToolbar({
           {...(activeThreadDevspaceRevOverride !== undefined
             ? { value: activeThreadDevspaceRevOverride }
             : {})}
+          edit={activeThreadDevspaceEdit}
           onValueChange={onActiveThreadDevspaceRevOverrideChange}
+          onEditChange={onActiveThreadDevspaceEditChange}
           {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
         />
       ) : null}

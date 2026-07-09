@@ -6400,6 +6400,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 prepareDevspace: {
                   repo: "owner/repo",
                   rev: "trunk()",
+                  edit: true,
                 },
                 runSetupScript: true,
               },
@@ -6428,6 +6429,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(addCheckout.mock.calls[0]?.[0], {
           repo: "owner/repo",
           rev: "trunk()",
+          edit: true,
           path: path.join(devspacesDir, "owner", "repo", "thread-bootstrap-devspace"),
         });
         assert.equal(refreshStatus.mock.calls.length, 0);
@@ -6513,6 +6515,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareDevspace: {
                 repo: "../../escaped",
                 rev: "trunk()",
+                edit: false,
               },
               runSetupScript: false,
             },
@@ -6612,6 +6615,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareDevspace: {
                 repo: "owner/repo",
                 rev: "trunk()",
+                edit: false,
               },
               runSetupScript: false,
             },
@@ -6624,6 +6628,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.deepEqual(addCheckout.mock.calls[0]?.[0], {
         repo: "owner/repo",
         rev: "trunk()",
+        edit: false,
         path: requestedCheckoutPath,
       });
       assert.deepEqual(removeCheckout.mock.calls[0]?.[0], { path: requestedCheckoutPath });
@@ -6723,6 +6728,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareDevspace: {
                 repo: "owner/repo",
                 rev: "trunk()",
+                edit: false,
               },
               runSetupScript: false,
             },

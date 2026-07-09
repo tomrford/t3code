@@ -1143,6 +1143,7 @@ function ChatViewContent(props: ChatViewProps) {
   const [pendingServerThreadDevspaceRev, setPendingServerThreadDevspaceRev] = useState<
     string | null
   >();
+  const [activeThreadDevspaceEdit, setActiveThreadDevspaceEdit] = useState(false);
   const [
     pendingServerThreadStartFromOriginByThreadId,
     setPendingServerThreadStartFromOriginByThreadId,
@@ -3603,6 +3604,7 @@ function ChatViewContent(props: ChatViewProps) {
     setPendingServerThreadEnvMode(null);
     setPendingServerThreadBranch(undefined);
     setPendingServerThreadDevspaceRev(undefined);
+    setActiveThreadDevspaceEdit(false);
   }, [activeThread?.id]);
 
   useEffect(() => {
@@ -3612,6 +3614,7 @@ function ChatViewContent(props: ChatViewProps) {
     setPendingServerThreadEnvMode(null);
     setPendingServerThreadBranch(undefined);
     setPendingServerThreadDevspaceRev(undefined);
+    setActiveThreadDevspaceEdit(false);
   }, [canOverrideServerThreadEnvMode]);
 
   useEffect(() => {
@@ -4173,6 +4176,7 @@ function ChatViewContent(props: ChatViewProps) {
                     prepareDevspace: {
                       repo: activeProject.devspaceRepo,
                       rev: activeThreadDevspaceRev,
+                      edit: activeThreadDevspaceEdit,
                     },
                     runSetupScript: true,
                   }
@@ -5271,6 +5275,8 @@ function ChatViewContent(props: ChatViewProps) {
                         : {})}
                       activeThreadDevspaceRevOverride={activeThreadDevspaceRev}
                       onActiveThreadDevspaceRevOverrideChange={setPendingServerThreadDevspaceRev}
+                      activeThreadDevspaceEdit={activeThreadDevspaceEdit}
+                      onActiveThreadDevspaceEditChange={setActiveThreadDevspaceEdit}
                       envLocked={envLocked}
                       onComposerFocusRequest={scheduleComposerFocus}
                       {...(canCheckoutPullRequestIntoThread

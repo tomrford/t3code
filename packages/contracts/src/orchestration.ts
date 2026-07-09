@@ -574,6 +574,7 @@ const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
 const ThreadTurnStartBootstrapPrepareDevspace = Schema.Struct({
   repo: TrimmedNonEmptyString,
   rev: TrimmedNonEmptyString,
+  edit: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 
 const ThreadTurnStartBootstrap = Schema.Struct({

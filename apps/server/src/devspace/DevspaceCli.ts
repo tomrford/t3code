@@ -22,6 +22,7 @@ export interface DevspaceAddCheckoutInput {
   readonly repo: string;
   readonly rev: string;
   readonly path: string;
+  readonly edit: boolean;
 }
 
 export interface DevspaceRemoveCheckoutInput {
@@ -61,6 +62,18 @@ export class DevspaceCli extends Context.Service<
     ) => Effect.Effect<DevspaceBookmarkList, DevspaceCliError>;
   }
 >()("t3/devspace/DevspaceCli") {}
+
+export const buildDevspaceAddCheckoutArgs = (
+  input: DevspaceAddCheckoutInput,
+): ReadonlyArray<string> => [
+  "add",
+  input.repo,
+  "-r",
+  input.rev,
+  ...(input.edit ? ["--edit"] : []),
+  input.path,
+  "--json",
+];
 
 const decodeDevspaceJson = <S extends Schema.Codec<unknown, unknown, never, never>>(
   raw: string,
@@ -146,7 +159,7 @@ export const make = Effect.gen(function* () {
       runJson(
         {
           operation: "DevspaceCli.addCheckout",
-          args: ["add", input.repo, "-r", input.rev, input.path, "--json"],
+          args: buildDevspaceAddCheckoutArgs(input),
           cwd: config.cwd,
         },
         DevspaceCheckoutInfo,

@@ -920,6 +920,7 @@ const makeWsRpcLayer = (
               const checkout = yield* devspace.addCheckout({
                 repo: bootstrap.prepareDevspace.repo,
                 rev: bootstrap.prepareDevspace.rev,
+                edit: bootstrap.prepareDevspace.edit,
                 path: checkoutPath,
               });
               const isCanonicalRootInsideDevspacesDir = yield* resolvesInsideDirectory({

@@ -230,6 +230,7 @@ describe("commandInvariants", () => {
           prepareDevspace: {
             repo: "owner/repo",
             rev: "trunk()",
+            edit: false,
           },
         },
       }).pipe(Effect.flip);
